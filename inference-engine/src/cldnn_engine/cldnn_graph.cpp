@@ -34,6 +34,28 @@ using namespace InferenceEngine::details;
 
 namespace CLDNNPlugin {
 
+static std::string GetStringEnv(const char* varName) {
+    std::string str;
+#ifdef _WIN32
+    char* env = nullptr;
+    size_t len = 0;
+    errno_t err = _dupenv_s(&env, &len, varName);
+    if (err == 0) {
+        if (env != nullptr) {
+            str = std::string(env);
+        }
+        free(env);
+    }
+#else
+    const char* env = getenv(varName);
+    if (env) {
+        str = std::string(env);
+    }
+#endif
+
+    return str;
+}
+
 CLDNNGraph::CLDNNGraph(InferenceEngine::CNNNetwork& network, gpu::ClContext::Ptr context, Config config, uint16_t stream_id)
     : m_context(context)
     , m_networkName(network.getName())
@@ -81,6 +103,17 @@ void CLDNNGraph::Build() {
     }
 
     UpdateImplementationsMap();
+
+    if (!GetStringEnv("DRY_DLBENCHMARK").empty()) {
+        auto dry_exec_graph_path = GetStringEnv("DRY_DLBENCHMARK_PATH");
+        if (dry_exec_graph_path.empty()) {
+            dry_exec_graph_path = "dry_exec_graph";
+        }
+        dry_exec_graph_path += ".xml";
+
+        GetExecGraphInfo().serialize(dry_exec_graph_path);
+        exit(0);
+    }
 }
 
 std::shared_ptr<cldnn::network> CLDNNGraph::BuildNetwork(std::shared_ptr<cldnn::program> program) {

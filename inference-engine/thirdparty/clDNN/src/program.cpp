@@ -356,10 +356,13 @@ void program_impl::set_options() {
 void program_impl::build_program(bool is_internal) {
     init_graph();
     { pre_optimize_graph(is_internal); }
-    run_graph_compilation();
-    { post_optimize_graph(is_internal); }
-    prepare_memory_dependencies();
-    engine->compile_program(*this);
+    run_graph_compilation();    // layer, pre_opt, primitive_type ok.
+
+    if (kernel_selector::GetStringEnv("DRY_DLBENCHMARK").empty()) {
+        { post_optimize_graph(is_internal); }
+        prepare_memory_dependencies();
+        engine->compile_program(*this);
+    }
 
     if (!is_internal)
         prim_info = get_current_stage_info();
