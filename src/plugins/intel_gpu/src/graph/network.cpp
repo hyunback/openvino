@@ -826,6 +826,7 @@ std::map<primitive_id, primitive_id> network::get_ext_id_mapping() const {
 std::shared_ptr<primitive_inst> network::get_primitive(const primitive_id& id) {
     if (!_primitives.count(id))
         allocate_primitive_instance(_program->get_node(id));
+        // test commit
 
     return _primitives.at(id);
 }
