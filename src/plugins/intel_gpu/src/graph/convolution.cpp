@@ -30,10 +30,10 @@ static format get_recommended_format(layout input_layout, data_types output_type
             case format::b_fs_yx_fsv4:          return format::b_fs_yx_fsv32;
             case format::b_fs_zyx_fsv2:
             case format::b_fs_zyx_fsv4:         return format::b_fs_zyx_fsv32;
-            case format::bs_fs_yx_bsv8_fsv2:
-            case format::bs_fs_yx_bsv8_fsv4:    return input_layout.batch() > 16 ? format::bs_fs_yx_bsv32_fsv32 : format::b_fs_yx_fsv32;
-            case format::bs_fs_zyx_bsv8_fsv2:
-            case format::bs_fs_zyx_bsv8_fsv4:   return input_layout.batch() > 16 ? format::bs_fs_zyx_bsv32_fsv32 : format::b_fs_zyx_fsv32;
+            case format::bs_fs_yx_bsv16_fsv2:
+            case format::bs_fs_yx_bsv16_fsv4:    return input_layout.batch() > 16 ? format::bs_fs_yx_bsv32_fsv32 : format::b_fs_yx_fsv32;
+            case format::bs_fs_zyx_bsv16_fsv2:
+            case format::bs_fs_zyx_bsv16_fsv4:   return input_layout.batch() > 16 ? format::bs_fs_zyx_bsv32_fsv32 : format::b_fs_zyx_fsv32;
             default:
                 break;
         }
@@ -47,10 +47,10 @@ static format get_recommended_format(layout input_layout, data_types output_type
             case format::b_fs_yx_fsv4:          return format::b_fs_yx_fsv16;
             case format::b_fs_zyx_fsv2:
             case format::b_fs_zyx_fsv4:         return format::b_fs_zyx_fsv16;
-            case format::bs_fs_yx_bsv8_fsv2:
-            case format::bs_fs_yx_bsv8_fsv4:    return input_layout.batch() > 16 ? format::bs_fs_yx_bsv32_fsv16 : format::b_fs_yx_fsv16;
-            case format::bs_fs_zyx_bsv8_fsv2:
-            case format::bs_fs_zyx_bsv8_fsv4:   return input_layout.batch() > 16 ? format::bs_fs_zyx_bsv32_fsv16 : format::b_fs_zyx_fsv16;
+            case format::bs_fs_yx_bsv16_fsv2:
+            case format::bs_fs_yx_bsv16_fsv4:    return input_layout.batch() > 16 ? format::bs_fs_yx_bsv32_fsv16 : format::b_fs_yx_fsv16;
+            case format::bs_fs_zyx_bsv16_fsv2:
+            case format::bs_fs_zyx_bsv16_fsv4:   return input_layout.batch() > 16 ? format::bs_fs_zyx_bsv32_fsv16 : format::b_fs_zyx_fsv16;
             default:
                 break;
         }
