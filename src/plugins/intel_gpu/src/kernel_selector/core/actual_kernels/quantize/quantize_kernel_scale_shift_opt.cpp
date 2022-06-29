@@ -31,33 +31,6 @@ ParamsKey QuantizeKernelScaleShift::GetSupportedKey() const {
     return k;
 }
 
-std::vector<size_t> static GetOptimalLocalWorkGroupSizes_(std::vector<size_t> gws, const EngineInfo& info, std::vector<size_t> order) {
-    const size_t lws_max = info.maxWorkGroupSize;
-    const size_t optimal_lws_values[] = { 1024, 960, 896, 832, 768, 704, 640, 576,
-                                          512, 480, 448, 416, 384, 352, 320, 288,
-                                          256, 227, 224, 192, 160, 128, 96, 64, 32, 16, 8, 7, 6, 5, 4, 2, 1 };
-    size_t total_lws = 1;
-    std::vector<size_t> lws(gws.size());
-
-    if (!order.empty() && gws.size() != order.size()) {
-        throw std::runtime_error("order size is different from gws size\n");
-    }
-
-    for (size_t i = 0; i < gws.size(); ++i) {
-        size_t order_idx = order.empty() ? i : order[i];
-        auto rest_lws = lws_max / total_lws;
-        size_t lws_idx = 0;
-        while (rest_lws < optimal_lws_values[lws_idx]) lws_idx++;
-
-        while (gws[order_idx] % optimal_lws_values[lws_idx]) lws_idx++;
-
-        lws[order_idx] = optimal_lws_values[lws_idx];
-        total_lws *= optimal_lws_values[lws_idx];
-    }
-
-    return lws;
-}
-
 CommonDispatchData QuantizeKernelScaleShift::SetDefault(const quantize_params& params, const optional_params&) const {
     CommonDispatchData dispatchData;
 
@@ -90,33 +63,8 @@ CommonDispatchData QuantizeKernelScaleShift::SetDefault(const quantize_params& p
         dispatchData.lws[2] = params.engineInfo.maxWorkGroupSize / feature_size;
     } else {
         dispatchData.gws = GetTensorFriendlyWorkGroups(output);
-#if 0
-        // dispatchData.lws = GetOptimalLocalWorkGroupSizes(dispatchData.gws, params.engineInfo);
-#else
-        // // test
-        // auto out_layout = params.outputs[0].GetLayout();
-        // dispatchData.lws = GetOptimalLocalWorkGroupSizes(dispatchData.gws, params.engineInfo, out_layout, out_layout);
-
-        // my test
-        // assume gws[xyz, f, b]
-        auto output_layout = params.outputs[0].GetLayout();
-        if (Tensor::SimpleLayout(output_layout)) {
-            dispatchData.lws = GetOptimalLocalWorkGroupSizes_(dispatchData.gws, params.engineInfo, {0, 1, 2});
-        } else {
-            auto blocked_bsv_fsv_layout = output_layout == DataLayout::bs_fs_yx_bsv16_fsv16 || output_layout == DataLayout::bs_fs_yx_bsv16_fsv4 ||
-                                        output_layout == DataLayout::bs_fs_zyx_bsv16_fsv16 || output_layout == DataLayout::bs_fs_zyx_bsv16_fsv32 ||
-                                        output_layout == DataLayout::bs_fs_zyx_bsv32_fsv16 || output_layout == DataLayout::bs_fs_zyx_bsv32_fsv32;
-            if (blocked_bsv_fsv_layout) {
-                dispatchData.lws = GetOptimalLocalWorkGroupSizes_(dispatchData.gws, params.engineInfo, {2, 1, 0});
-            } else {
-                dispatchData.lws = GetOptimalLocalWorkGroupSizes_(dispatchData.gws, params.engineInfo, {1, 0, 2});
-            }
-        }
-#endif
-        for (auto tt : dispatchData.lws) {
-            std::cout << tt << " ";
-        }
-        std::cout << std::endl;
+        auto out_layout = params.outputs[0].GetLayout();
+        dispatchData.lws = GetOptimalLocalWorkGroupSizes(dispatchData.gws, params.engineInfo, out_layout, out_layout);
     }
 
     return dispatchData;
