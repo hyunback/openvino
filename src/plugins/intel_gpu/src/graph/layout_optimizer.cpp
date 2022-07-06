@@ -214,10 +214,10 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
     if (next.is_type<reorder>())
         return true;
 
-    // keep reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv8_fsv2) before first conv(shallow feature)
+    // keep reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv16_fsv2) before first conv(shallow feature)
     if (use_onednn_impls && next.is_type<convolution>()) {
         auto reorder_layout = next.get_dependency(0).get_output_layout();
-        if ((reorder_layout.format == format::b_fs_zyx_fsv2 || reorder_layout.format == format::bs_fs_zyx_bsv8_fsv2) &&
+        if ((reorder_layout.format == format::b_fs_zyx_fsv2 || reorder_layout.format == format::bs_fs_zyx_bsv16_fsv2) &&
             (reorder_layout.feature() <= 4)) {
             return false;
         }
@@ -394,10 +394,10 @@ bool layout_optimizer::can_fuse_reorder_to_prev(program_node& prev, program_node
         return true;
 
 
-    // fusing reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv8_fsv2) before first conv(shallow feature)
+    // fusing reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv16_fsv2) before first conv(shallow feature)
     if (use_onednn_impls && next->is_type<convolution>()) {
         auto reorder_layout = next->get_dependency(0).get_output_layout();
-        if ((reorder_layout.format == format::b_fs_zyx_fsv2 || reorder_layout.format == format::bs_fs_zyx_bsv8_fsv2) &&
+        if ((reorder_layout.format == format::b_fs_zyx_fsv2 || reorder_layout.format == format::bs_fs_zyx_bsv16_fsv2) &&
             (reorder_layout.feature() <= 4)) {
             return true;
         }
