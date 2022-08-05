@@ -76,6 +76,7 @@ struct format {
         yxfb,                                   ///< batch first, feature and than spatials
         byxf,                                   ///< used in bitmaps, input from user i.e b images of RGB format
         fyxb,                                   ///< format not used inside clDNN, but supported in reorder as extension
+        bzyxf,
                                                 ///< for user provided formats.
         b_fs_yx_fsv2,
         b_fs_zyx_fsv2,
@@ -174,8 +175,10 @@ struct format {
         os_is_yx_osa2_isa8_osv16_isv4,
         os_is_yx_isa8_osv8_isv2,
         is_os_yx_isa8_osv8_isv2,
+        is_os_yx_isa8_osv8_isv4,
         os_is_zyx_isa8_osv8_isv2,
         is_os_zyx_isa8_osv8_isv2,
+        is_os_zyx_isa8_osv8_isv4,
         is_os_yx_isa2_osa8_isv8_osv2,
         is_os_yx_isa4_osa8_isv8_osv4,
         is_os_yx_osa4_isa8_osv8_isv4,
@@ -203,6 +206,14 @@ struct format {
         os_i_yxs_osv4_yxsv4,
         os_i_osv16__ai8,                              ///< format used only for fully connected weights
         os_i_osv8__ai8,                               ///< format used only for fully connected weights
+        os_y_is_x_osv8_isv2,
+        os_y_is_x_osv8_isv4,
+        os_yx_is_osv8_isv2,
+        os_yx_is_osv8_isv4,
+        os_zyx_is_osv8_isv2,
+        os_zyx_is_osv8_isv4,
+        os_zy_is_x_osv8_isv2,
+        os_zy_is_x_osv8_isv4,
 
         goiyx,                                        ///< format used for weights for 2D convolution
         gioyx,                                        ///< format used for weights for 2D deconvolution
@@ -220,6 +231,7 @@ struct format {
         g_os_is_zyx_osv16_isv16,
         g_is_os_yx_isv16_osv16,
         g_os_is_yx_isa8_osv8_isv2,
+        g_os_is_yx_isa8_osv8_isv4,
         g_os_is_zyx_isv8_osv16_isv2,
         g_os_is_yx_isv8_osv16_isv2,
         g_os_is_zyx_isv16_osv16,
@@ -245,6 +257,10 @@ struct format {
         g_os_is_yx_osa2_isa8_osv16_isv4,
         g_os_is_zyx_osa4_isa8_osv8_isv2,
         g_os_is_zyx_osa4_isa8_osv8_isv4,
+        g_os_yx_is_osv8_isv2,
+        g_os_yx_is_osv8_isv4,
+        g_os_y_is_x_osv8_isv2,
+        g_os_y_is_x_osv8_isv4,
 
         format_num,  ///< number of format types
         any        = -1

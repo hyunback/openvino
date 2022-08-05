@@ -488,7 +488,7 @@ public:
             }
 
             // skip z for the formats that do not have it
-            if (((new_fmt != format::bfzyx && new_fmt != format::b_fs_zyx_fsv16 && new_fmt != format::b_fs_zyx_fsv32 &&
+            if (((new_fmt != format::bfzyx && new_fmt != format::b_fs_zyx_fsv16 && new_fmt != format::b_fs_zyx_fsv32 && new_fmt != format::bzyxf &&
                   new_fmt != format::bfwzyx && new_fmt != format::bs_fs_zyx_bsv16_fsv16 && new_fmt != format::bs_fs_zyx_bsv16_fsv32 &&
                   new_fmt != format::bs_fs_zyx_bsv32_fsv16 && new_fmt != format::bs_fs_zyx_bsv32_fsv32 &&
                   new_fmt != format::b_fs_zyx_fsv2 && new_fmt != format::b_fs_zyx_fsv4 &&
