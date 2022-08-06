@@ -214,7 +214,7 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
     if (next.is_type<reorder>())
         return true;
 
-    // keep reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv16_fsv2) before first conv(shallow feature)
+    // keep reorder(byxf/bzyxf) before first conv(shallow feature)
     if (use_onednn_impls && next.is_type<convolution>()) {
         auto reorder_layout = next.get_dependency(0).get_output_layout();
         int shallow_ch = 8;
@@ -397,7 +397,7 @@ bool layout_optimizer::can_fuse_reorder_to_prev(program_node& prev, program_node
         return true;
 
 
-    // fusing reorder(b_fs_zyx_fsv2/bs_fs_zyx_bsv16_fsv2) before first conv(shallow feature)
+    // fusing reorder(byxf/bzyxf) before first conv(shallow feature)
     if (use_onednn_impls && next->is_type<convolution>()) {
         auto reorder_layout = next->get_dependency(0).get_output_layout();
         int shallow_ch = 8;
@@ -1098,12 +1098,11 @@ layout layout_optimizer::get_expected_layout(layout const& current_layout,
         bool i8_u8_output = data_type_traits::is_i8_u8(output_layout.data_type);
         bool fp16_output = output_layout.data_type == data_types::f16;
 
-        // oneDNNv2.6 needs acdb format for shallow group conv
-        if (!non_grouped && is_2d &&
-            ((is_dw && ((i8_u8_input && input_layout.feature() <= 16) || (fp16_output && input_layout.feature() <= 8))) ||
-            (!is_dw && ((i8_u8_input && ofm_per_group % 32 != 0) || (fp16_output && ofm_per_group % 16 != 0))))) {
-            expected_format = cldnn::format::byxf;
-        } else if (output_layout.feature() <= 16) {
+        if (!non_grouped && true &&
+            (!is_dw && ((true && ifm_per_group != 1) || (true && ofm_per_group != 1)))) {
+            expected_format = is_2d ? cldnn::format::byxf : cldnn::format::bzyxf;
+        } else if ((i8_u8_output && output_layout.feature() <= 16) || (fp16_output && output_layout.feature() <= 8) ||
+                   (output_layout.data_type == data_types::f32 &&  output_layout.feature() <= 4)) {
                 expected_format = is_2d ? cldnn::format::byxf : cldnn::format::bzyxf;
         } else if (i8_u8_output) {
              if (non_grouped || valid_grouped || is_dw) {
@@ -1563,8 +1562,6 @@ impl_types layout_optimizer::get_preferred_impl_type(program_node& node, format 
             format::b_fs_yx_fsv32,
             format::b_fs_zyx_fsv16,
             format::b_fs_yx_fsv16,
-            // format::b_fs_zyx_fsv4,
-            // format::b_fs_zyx_fsv2,
             format::bs_fs_zyx_bsv16_fsv16,
             format::bs_fs_yx_bsv16_fsv16,
             format::bs_fs_zyx_bsv32_fsv16,
