@@ -617,19 +617,57 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
         auto conv_format = output_layout.format;
         int32_t group_size = conv_node.get_groups();
         bool is_dw = group_size > 1 && (group_size == input_layout.feature() && group_size == output_layout.feature());
-        if (conv_node.impl_type == impl_types::onednn &&
-            lo.needs_onednn_small_ic_to_blocked(conv_format, input_layout, conv_node) && !is_dw) {
-            auto new_layout = input_layout;
-            auto dims = new_layout.format.dimension();
-            new_layout.format = (dims == 5) ? format::bzyxf : format::byxf;
-            if (new_layout == input_layout)
-                return;
+        if (conv_node.impl_type == impl_types::onednn) {
+            if (lo.needs_onednn_small_ic_to_blocked(conv_format, input_layout, conv_node) && !is_dw) {
+                auto new_layout = input_layout;
+                auto dims = new_layout.format.dimension();
+                new_layout.format = (dims == 4) ? format::byxf : format::bzyxf;
+                if (new_layout == input_layout)
+                    return;
 
-            auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
-            if (new_input.first) {
-                p.add_intermediate(new_input.first, conv_node, 0, !new_input.second);
+                auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
+                if (new_input.first) {
+                    p.add_intermediate(new_input.first, conv_node, 0, !new_input.second);
+                }
+                conv_node.get_dependencies().front()->set_output_layout(new_layout, false);
+            } else if (!lo.needs_onednn_small_ic_to_blocked(conv_format, input_layout, conv_node)) {
+                bool is_shallow_out = ((data_type_traits::is_i8_u8(output_layout.data_type) && output_layout.feature() <= 16) ||
+                                       (output_layout.data_type == data_types::f16 && output_layout.feature() <= 8) ||
+                                       (output_layout.data_type == data_types::f32 && output_layout.feature() <= 4));
+                if (is_shallow_out) {
+                    auto new_layout = input_layout;
+                    auto dims = new_layout.format.dimension();
+                    new_layout.format = (dims == 5) ? format::bzyxf : format::byxf;
+                    auto dt = input_layout.data_type;
+                    if (dt == data_types::i8 || dt == data_types::u8) {
+                        if (input_layout.batch() >= 16) {
+                            new_layout.format = (dims == 4) ? cldnn::format::bs_fs_yx_bsv32_fsv32 : cldnn::format::bs_fs_zyx_bsv32_fsv32;
+                        } else {
+                            new_layout.format = (dims == 4) ? cldnn::format::b_fs_yx_fsv32 : cldnn::format::b_fs_zyx_fsv32;
+                        }
+                    } else if (dt == data_types::f16) {
+                        if (input_layout.batch() >= 16) {
+                            new_layout.format = (dims == 4) ? cldnn::format::bs_fs_yx_bsv32_fsv16 : cldnn::format::bs_fs_zyx_bsv32_fsv16;
+                        } else {
+                            new_layout.format = (dims == 4) ? cldnn::format::b_fs_yx_fsv16 : cldnn::format::b_fs_zyx_fsv16;
+                        }
+                    } else if (dt == data_types::i32) {
+                        if (input_layout.batch() >= 16) {
+                            new_layout.format = (dims == 4) ? cldnn::format::bs_fs_yx_bsv16_fsv16 : cldnn::format::bs_fs_zyx_bsv16_fsv16;
+                        } else {
+                            new_layout.format = (dims == 4) ? cldnn::format::b_fs_yx_fsv16 : cldnn::format::b_fs_zyx_fsv16;
+                        }
+                    }
+                    if (new_layout == input_layout)
+                        return;
+
+                    auto new_input = rf.get_reorder(input.id(), input_layout, new_layout);
+                    if (new_input.first) {
+                        p.add_intermediate(new_input.first, conv_node, 0, !new_input.second);
+                    }
+                    conv_node.get_dependencies().front()->set_output_layout(new_layout, false);
+                }
             }
-            conv_node.get_dependencies().front()->set_output_layout(new_layout, false);
         }
 
         // reorder for onednn mixed-precision conv

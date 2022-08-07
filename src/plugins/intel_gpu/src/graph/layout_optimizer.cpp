@@ -214,17 +214,6 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
     if (next.is_type<reorder>())
         return true;
 
-    // keep reorder(byxf/bzyxf) before first conv(shallow feature)
-    if (use_onednn_impls && next.is_type<convolution>()) {
-        auto reorder_layout = next.get_dependency(0).get_output_layout();
-        int shallow_ch = 8;
-        if (data_type_traits::is_i8_u8(reorder_layout.data_type)) shallow_ch = 16;
-        if ((reorder_layout.format == format::byxf || reorder_layout.format == format::bzyxf) &&
-            (reorder_layout.feature() <= shallow_ch)) {
-            return false;
-        }
-    }
-
     // resample_opt kernel can work cross-layout between fsv16 and fsv32
     if (next.is_type<resample>() &&
         (fmt_prev == format::b_fs_yx_fsv16 || fmt_prev == format::b_fs_yx_fsv32
@@ -318,15 +307,16 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
             prev.is_input() && (prev_dt == data_types::u8 || prev_dt == data_types::i8))
             return true;
 
-        // Remove reorder to support blocked input for first convolution
-        if (next.is_type<convolution>() && needs_onednn_small_ic_to_blocked(fmt_next, prev_output_layout, next.as<convolution>()) &&
-            ((prev_output_layout.data_type == data_types::f16 && prev_output_layout.batch() < 16 &&
-                 (fmt_prev == format::byxf || fmt_prev == format::bzyxf)) ||
-             (prev_output_layout.data_type == data_types::f16 && prev_output_layout.batch() >= 16 && fmt_prev == format::bs_fs_yx_bsv8_fsv2) ||
-             (data_type_traits::is_i8_u8(prev_output_layout.data_type) && prev_output_layout.batch() < 16 &&
-                (fmt_prev == format::byxf || fmt_prev == format::bzyxf)) ||
-             (data_type_traits::is_i8_u8(prev_output_layout.data_type) && prev_output_layout.batch() >= 16 && fmt_prev == format::bs_fs_yx_bsv8_fsv4)))
-            return true;
+        // keep reorder(byxf/bzyxf) before first conv(shallow feature)
+        if (use_onednn_impls && next.is_type<convolution>()) {
+            auto reorder_layout = next.get_dependency(0).get_output_layout();
+            int shallow_ch = 8;
+            if (data_type_traits::is_i8_u8(reorder_layout.data_type)) shallow_ch = 16;
+            if ((reorder_layout.format == format::byxf || reorder_layout.format == format::bzyxf) &&
+                (reorder_layout.feature() <= shallow_ch)) {
+                return false;
+            }
+        }
 
         // Remove Reorder for Convolution if mixed layout.
         if (next.is_type<convolution>() && !needs_onednn_small_ic_to_blocked(fmt_next, prev_output_layout, next.as<convolution>()) &&
@@ -894,6 +884,8 @@ bool layout_optimizer::needs_onednn_small_ic_to_blocked(format fmt_next, layout&
         format::bs_fs_zyx_bsv16_fsv16,
         format::bs_fs_zyx_bsv32_fsv16,
         format::bs_fs_zyx_bsv32_fsv32,
+        format::byxf,
+        format::bzyxf,
     };
     if (std::find(target_output_format.begin(), target_output_format.end(), fmt_next) == target_output_format.end()) return false;
 
