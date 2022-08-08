@@ -21,11 +21,13 @@ primitive_type_id convolution::type_id() {
 
 static format get_recommended_format(layout input_layout, data_types output_type, int output_feature, uint groups) {
     bool is_dw = input_layout.feature() == static_cast<int>(groups) && output_feature == static_cast<int>(groups);
-    int ifm_per_group = input_layout.feature() / groups;
     int ofm_per_group = output_feature / groups;
-    if (groups > 1 && (!is_dw && (ifm_per_group != 1 || ofm_per_group != 1)))
+    if (groups > 1 &&
+        ((is_dw && ((data_type_traits::is_i8_u8(output_type) && output_feature < 32) ||
+                   (data_type_traits::is_floating_point(input_layout.data_type) && output_feature < 16))) ||
+         (!is_dw && ((ofm_per_group % 32 != 0))))) {
         return input_layout.format.spatial_num() == 2 ? format::byxf : format::bzyxf;
-
+    }
     if (data_type_traits::is_i8_u8(output_type)) {
         if (output_feature <= 16)
             return input_layout.format.spatial_num() == 2 ? format::byxf : format::bzyxf;

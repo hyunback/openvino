@@ -1090,8 +1090,10 @@ layout layout_optimizer::get_expected_layout(layout const& current_layout,
         bool i8_u8_output = data_type_traits::is_i8_u8(output_layout.data_type);
         bool fp16_output = output_layout.data_type == data_types::f16;
 
-        if (!non_grouped && true &&
-            (!is_dw && ((true && ifm_per_group != 1) || (true && ofm_per_group != 1)))) {
+        if (!non_grouped &&
+            ((is_dw && ((i8_u8_output && output_layout.feature() < 32) ||
+                        (data_type_traits::is_floating_point(output_layout.data_type) && output_layout.feature() < 16))) ||
+             (!is_dw && ((ofm_per_group % 32 != 0))))) {
             expected_format = is_2d ? cldnn::format::byxf : cldnn::format::bzyxf;
         } else if ((i8_u8_output && output_layout.feature() <= 16) || (fp16_output && output_layout.feature() <= 8) ||
                    (output_layout.data_type == data_types::f32 &&  output_layout.feature() <= 4)) {

@@ -637,7 +637,6 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
                 if (is_shallow_out) {
                     auto new_layout = input_layout;
                     auto dims = new_layout.format.dimension();
-                    new_layout.format = (dims == 5) ? format::bzyxf : format::byxf;
                     auto dt = input_layout.data_type;
                     if (dt == data_types::i8 || dt == data_types::u8) {
                         if (input_layout.batch() >= 16) {
