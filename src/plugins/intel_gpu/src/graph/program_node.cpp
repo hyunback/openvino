@@ -622,7 +622,7 @@ dnnl::post_ops program_node::try_optimize_post_ops(dnnl::post_ops& p_ops, const 
     };
     auto type_is_binary_add        = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::binary_add; };
     auto type_is_binary_mul        = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::binary_mul; };
-    // auto type_is_sum               = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::sum; };
+    auto type_is_sum               = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::sum; };
     auto type_is_optimized_sum     = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::optimized_sum; };
     auto type_is_scale             = [](onednn_post_op_type type) -> bool { return type == onednn_post_op_type::scale; };
 
@@ -740,8 +740,8 @@ dnnl::post_ops program_node::try_optimize_post_ops(dnnl::post_ops& p_ops, const 
         auto eltw_and_eltw  = type_is_eltwise(cur_type) && type_is_eltwise(prev_type);
         auto bin_and_eltw   = type_is_binary_add_or_mul(cur_type) && type_is_eltwise_linear(prev_type);
         auto eltw_and_bin   = type_is_eltwise_linear(cur_type) && type_is_binary_add_or_mul(prev_type);
-        // auto sum_and_eltw   = type_is_sum(cur_type) && type_is_eltwise(prev_type);
-        auto sum_and_eltw   = false;    // TODO: oneDNN3.0 Need code clean
+        auto sum_and_eltw   = type_is_sum(cur_type) && type_is_eltwise(prev_type);
+        // auto sum_and_eltw   = false;    // TODO: oneDNN3.0 Need code clean
         auto eltw_and_scale = type_is_eltwise_linear(cur_type) && type_is_scale(prev_type);
 
         auto can_try_optimize = eltw_and_eltw ||
@@ -765,8 +765,8 @@ dnnl::post_ops program_node::try_optimize_post_ops(dnnl::post_ops& p_ops, const 
                 p_ops.get_params_eltwise(cur_idx, cur_alg, cur_alpha, cur_beta);
 
                 auto eltw_linear_and_eltw_linear = type_is_eltwise_linear(cur_type) && type_is_eltwise_linear(prev_type);
-                // auto eltw_linear_and_eltw_non_linear = type_is_eltwise_linear(cur_type) && !type_is_eltwise_linear(prev_type) && cur_beta == 0;
-                auto eltw_linear_and_eltw_non_linear = false;   // TODO: oneDNN3.0 Need code clean
+                auto eltw_linear_and_eltw_non_linear = type_is_eltwise_linear(cur_type) && !type_is_eltwise_linear(prev_type) && cur_beta == 0;
+                // auto eltw_linear_and_eltw_non_linear = false;   // TODO: oneDNN3.0 Need code clean
 
                 // eltwise_linear + eltwise_linear combination can be optimized always
                 if (eltw_linear_and_eltw_linear) {
@@ -1044,9 +1044,10 @@ void program_node::init_onednn_primitive_attributes() {
     };
 
     auto cant_use_output_scales = [&](size_t idx, data_types in_data_type) {
-        return true;    // TODO: oneDNN3.0: debugging code, scale with mask2 has issue?
+        // return true;    // TODO: oneDNN3.0: debugging code, scale with mask2 has issue?
         return (idx != 0 ||
                 // has_out_scales(attrs) ||
+                out_scales ||
                 is_type<pooling>() ||
                 is_type<reduce>() ||
                 (is_type<convolution>() && data_type_traits::is_floating_point(in_data_type)) ||
