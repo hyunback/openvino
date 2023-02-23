@@ -79,6 +79,27 @@ dnnl::memory::dims convert_gemm_tensor(cldnn::tensor t, size_t dims, bool batche
     }
     return res;
 }
+dnnl::memory::dims convert_gemm_tensor1(cldnn::tensor t, size_t dims, bool batched_dims_can_be_removed) {
+    auto sizes = t.sizes(default_fmt_for_dims(dims, false));
+    dnnl::memory::dims res(sizes.begin(), sizes.end());
+    if (dims > 3) {
+        for (size_t i = 0; i < dims - 3; i++) {
+            res[i + 1] *= res[i];
+        }
+        res.erase(res.begin(), res.begin() + dims - 3);
+    }
+    if (res.size() == 3 && batched_dims_can_be_removed) {
+        res.erase(res.begin());
+        // res.erase(res.begin() + 1); // test
+    }
+    // if (res.size() == 3) {
+    //     // auto temp = res[0];
+    //     // res.erase(res.begin());
+    //     // res[0] = temp;
+    //     res[0] = 1;
+    // }
+    return res;
+}
 
 dnnl::memory::format_tag convert_gemm_data_format(dnnl::memory::dims dims) {
     if (dims.size() > 3)

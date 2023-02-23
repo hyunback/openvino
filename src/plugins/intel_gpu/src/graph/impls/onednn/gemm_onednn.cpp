@@ -101,17 +101,25 @@ protected:
         in0_dims = onednn::convert_gemm_tensor(in0_l.get_tensor(), rank, batched_dims_can_be_removed);
         in1_dims = onednn::convert_gemm_tensor(in1_l.get_tensor(), rank, batched_dims_can_be_removed);
         out_dims = onednn::convert_gemm_tensor(out_l.get_tensor(), rank, batched_dims_can_be_removed);
+        std::cout << "gemm out_dim start ----: " << batched_dims_can_be_removed << std::endl;
+        std::cout << out_l.to_short_string() << std::endl;
+        for (size_t i = 0; i < out_dims.size(); ++i) {
+            std::cout << i << ": " << out_dims[i] << std::endl;
+        }
+        std::cout << "------" << std::endl;
 
         in0_fmt = onednn::convert_gemm_data_format(in0_dims);
         in1_fmt = onednn::convert_gemm_data_format(in1_dims);
         out_fmt = onednn::convert_gemm_data_format(out_dims);
 
         if (prim->transpose_input0) {
+            std::cout << "prim->transpose_input0: " << prim->transpose_input0 << std::endl;
             in0_fmt = transpose_format(in0_fmt);
             std::swap(in0_dims[in0_dims.size() - 1], in0_dims[in0_dims.size() - 2]);
         }
 
         if (prim->transpose_input1) {
+            std::cout << "prim->transpose_input1: " << prim->transpose_input1 << std::endl;
             in1_fmt = transpose_format(in1_fmt);
             std::swap(in1_dims[in1_dims.size() - 1], in1_dims[in1_dims.size() - 2]);
         }
@@ -145,6 +153,8 @@ protected:
         dnnl::memory::format_tag in1_fmt;
         dnnl::memory::format_tag out_fmt;
         dnnl::memory::format_tag bias_fmt;
+
+
 
         get_gemm_primitive_md(impl_params, in0_dt, in1_dt, out_dt, in0_dims, in1_dims, out_dims, in0_fmt, in1_fmt, out_fmt,
                               gemm_with_bias, bias_dt, bias_dims, bias_fmt);
@@ -305,6 +315,9 @@ public:
         for (auto prim : arg.get_fused_primitives()) {
             full_tensor_or_per_tensor &=
                 prim.input_layout.count() == prim.output_layout.count() || prim.input_layout.count() == 1;
+            if (prim.is_type<eltwise>()) {
+                std::cout << "Has eltwise post op-" << std::endl;
+            }
         }
         if (!full_tensor_or_per_tensor) {
             IE_THROW() << "Unimplemented: per channel binary post-operation is not supported for onednn gemm. Refer PR(#15353) message.";
