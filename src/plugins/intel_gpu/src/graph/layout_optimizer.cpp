@@ -286,8 +286,10 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
     // Do not remove reorder if it is necessary to fulfill required_input
     auto& reorder_node = next.get_dependency(0);
     auto reorder_layout = reorder_node.get_output_layout();
-    if (reorder_layout.format == next.get_preferred_input_fmt(next.get_dependency_index(reorder_node))
+    // hb test -> It seems the if statement below should go away or NOT data_padding. Need to check dry_run.
+    if ((reorder_layout.format == next.get_preferred_input_fmt(next.get_dependency_index(reorder_node)))
             && !reorder_layout.data_padding)
+            // && reorder_layout.data_padding)
         return false;
 
     // resample_opt kernel can work cross-layout between fsv16 and fsv32
@@ -308,6 +310,11 @@ bool layout_optimizer::can_fuse_reorder(program_node& prev, program_node& next, 
     if (next.is_type<eltwise>() && prev_simple && next_simple)
         return true;
 
+    // test for swin transform
+    if ((next.is_type<permute>() || next.is_type<fully_connected>())
+            && (fmt_prev == fmt_next) && (prev_dt != next_dt)) {
+        return true;
+    }
     if (next.is_type<permute>() && (fmt_prev == format::b_fs_zyx_fsv16 &&
         next_output_layout.batch() > 1 &&
         next_output_layout.feature() % 16 != 0)) {
@@ -496,6 +503,11 @@ bool layout_optimizer::can_fuse_reorder_to_prev(program_node& prev, reorder_node
         if (prev.is_type<eltwise>() &&
             is_mixed_layout(prev, *next, false, {{ format::bs_fs_zyx_bsv32_fsv32, format::bs_fs_zyx_bsv32_fsv16 }}))
             return true;
+    }
+
+    if (prev.is_type<eltwise>()
+         && (fmt_prev == fmt_next) && (dt_prev != dt_next)) {
+        return true;
     }
 
     return false;
