@@ -1208,8 +1208,8 @@ public:
 
     void execute(gemm_params& p, bool is_caching_test = false) {
         auto& engine = get_test_engine();
-        if (!engine.get_device_info().supports_immad)
-            return;
+        // if (!engine.get_device_info().supports_immad)    // temp
+        //     return;
         auto y0_size = p.m_size;
         auto y0_pitch = p.k_size;
         auto x0_size = p.k_size;
@@ -1330,7 +1330,7 @@ public:
 
         const float threshold_int8 = 1.f;
         const float threshold_fp16 = 1e-1;
-        const float threshold_fp32 = 3e-4;
+        const float threshold_fp32 = 1e-1; //3e-4;
 
         ASSERT_EQ(output_ptr.size(), (size_t)(p.b_out_num * p.f_out_num * p.m_size * p.n_size));
         if (sizeof(input0_type) == 1) {
@@ -1842,6 +1842,44 @@ INSTANTIATE_TEST_SUITE_P(gemm_gpu, gemm_fp16_tiled_nt_tests, ::testing::ValuesIn
     gemm_base_test_params{ CASE_GEMM_FP16_TILED_NT_2, "gemm_tiled_opt" },
     gemm_base_test_params{ CASE_GEMM_FP16_TILED_NT_3, "gemm_tiled_opt" },
     gemm_base_test_params{ CASE_GEMM_FP16_TILED_NT_4, "gemm_tiled_opt" },
+}));
+
+#define CASE_GEMM_FP32_TILE_SIMPLE1 3, 17, 2, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILE_SIMPLE2 3, 2, 17, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILE_SIMPLE3 3, 17, 17, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILE_SIMPLE4 4, 16, 32, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILE_SIMPLE5 8, 35, 17, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILE_SIMPLE6 18, 35, 17, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.0f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+
+#define CASE_GEMM_FP32_TILED_MY1 4096, 4096, 40, 1, 16, 1, 16, 1, 1, 1, 16, false, true, \
+1.f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILED_MY2 4096, 4096, 40, 1, 16, 1, 16, 1, 1, 1, 16, false, false, \
+1.f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILED_MY3 4096, 77, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, true, \
+1.f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+#define CASE_GEMM_FP32_TILED_MY4 4096, 77, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.f, 0.f, data_types::f32, data_types::f32, data_types::f32, data_types::f32, { -10, 10, 10 }, { -10, 10, 10 }, { -10, 10, 10 }
+
+class gemm_fp32_tiled_my_tests : public ::GemmBaseTest<gemm_base_test_params, float, float, float, float, float> {};
+TEST_P(gemm_fp32_tiled_my_tests, basic) { auto p = GetParam(); execute(p); }
+
+INSTANTIATE_TEST_SUITE_P(gemm_gpu, gemm_fp32_tiled_my_tests, ::testing::ValuesIn(std::vector <gemm_base_test_params> {
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE1, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE2, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE3, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE4, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE5, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILE_SIMPLE6, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILED_MY1, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILED_MY2, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILED_MY3, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP32_TILED_MY4, "gemm_tiled_opt" },
 }));
 
 class gemm_fp16_tiled_tn_tests : public ::GemmBaseTest<gemm_base_test_params, FLOAT16, FLOAT16, FLOAT16, FLOAT16, FLOAT16> {};

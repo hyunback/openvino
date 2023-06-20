@@ -155,12 +155,21 @@ KERNEL(gemm_tiled_opt)(
 #if IS_DYNAMIC
             b_tile[b_load_id] = TILE_N_NOT_DIVISIBLE ? (b_raw_global_id > N - 1 ? 0 : b_ptr[sglid]) : BLOCK_READ_B(b_ptr, 0);
 #else // IS_DYNAMIC
+#if TRANSPOSE_INPUT1
+#if TILE_K_NOT_DIVISIBLE
+            b_tile[b_load_id] = b_ptr[sglid];
+#else // TILE_K_NOT_DIVISIBLE
+            b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
+#endif // TILE_K_NOT_DIVISIBLE
+#else  // TRANSPOSE_INPUT1
 #if TILE_N_NOT_DIVISIBLE
             b_tile[b_load_id] = b_raw_global_id > N - 1 ? 0 : b_ptr[sglid];
 #else // TILE_N_NOT_DIVISIBLE
             b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
 #endif // TILE_N_NOT_DIVISIBLE
+#endif  // TRANSPOSE_INPUT1
 #endif // IS_DYNAMIC
+
 #if !TRANSPOSE_INPUT1
             b_ptr += N;
 #else // !TRANSPOSE_INPUT1
@@ -288,6 +297,18 @@ KERNEL(gemm_tiled_opt)(
     }
 #else // IS_DYNAMIC
 #if TILE_K_NOT_DIVISIBLE
+#if TRANSPOSE_INPUT1
+    // Loading leftovers of the matrix B
+    unroll_for (uint b_load_id = 0; b_load_id < TILE_K; b_load_id++) {
+#if TILE_K_NOT_DIVISIBLE
+        // b_tile[b_load_id] = b_raw_global_id > K - 1 ? 0 : b_ptr[sglid];
+        b_tile[b_load_id] = b_ptr[sglid];
+#else // TILE_K_NOT_DIVISIBLE
+        b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
+#endif // TILE_K_NOT_DIVISIBLE
+        b_ptr += K;
+    } // Loading leftovers of the matrix B end
+#else   // TRANSPOSE_INPUT1
     // Loading leftovers of the matrix B
     unroll_for (uint b_load_id = 0; b_load_id < TILE_K_LEFTOVER; b_load_id++) {
 #if TILE_N_NOT_DIVISIBLE
@@ -297,6 +318,36 @@ KERNEL(gemm_tiled_opt)(
 #endif // TILE_N_NOT_DIVISIBLE
         b_ptr += N;
     } // Loading leftovers of the matrix B end
+#endif // TRANSPOSE_INPUT1
+
+#if TRANSPOSE_INPUT1
+        // B tile shuffling for NT, TT cases
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col0 = BLOCK_SHUFFLE(b_tile, 0);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col1 = BLOCK_SHUFFLE(b_tile, 1);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col2 = BLOCK_SHUFFLE(b_tile, 2);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col3 = BLOCK_SHUFFLE(b_tile, 3);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col4 = BLOCK_SHUFFLE(b_tile, 4);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col5 = BLOCK_SHUFFLE(b_tile, 5);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col6 = BLOCK_SHUFFLE(b_tile, 6);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col7 = BLOCK_SHUFFLE(b_tile, 7);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col8 = BLOCK_SHUFFLE(b_tile, 8);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col9 = BLOCK_SHUFFLE(b_tile, 9);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col10 = BLOCK_SHUFFLE(b_tile, 10);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col11 = BLOCK_SHUFFLE(b_tile, 11);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col12 = BLOCK_SHUFFLE(b_tile, 12);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col13 = BLOCK_SHUFFLE(b_tile, 13);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col14 = BLOCK_SHUFFLE(b_tile, 14);
+        MAKE_VECTOR_TYPE(INPUT1_TYPE, SIMD_WIDTH) b_tile_col15 = BLOCK_SHUFFLE(b_tile, 15);
+
+        b_tile.s0 = b_tile_col0[sglid]; b_tile.s1 = b_tile_col1[sglid];
+        b_tile.s2 = b_tile_col2[sglid]; b_tile.s3 = b_tile_col3[sglid];
+        b_tile.s4 = b_tile_col4[sglid]; b_tile.s5 = b_tile_col5[sglid];
+        b_tile.s6 = b_tile_col6[sglid]; b_tile.s7 = b_tile_col7[sglid];
+        b_tile.s8 = b_tile_col8[sglid]; b_tile.s9 = b_tile_col9[sglid];
+        b_tile.sa = b_tile_col10[sglid]; b_tile.sb = b_tile_col11[sglid];
+        b_tile.sc = b_tile_col12[sglid]; b_tile.sd = b_tile_col13[sglid];
+        b_tile.se = b_tile_col14[sglid]; b_tile.sf = b_tile_col15[sglid];
+#endif // TRANSPOSE_INPUT1
 
     // Loading leftovers of the matrix A and tile C calculation
     unroll_for (uint dot_id = 0; dot_id < tile_m_iterations; dot_id++) {
