@@ -501,6 +501,9 @@ bool should_use_winograd_2x3_s1(std::shared_ptr<const convolution> const& prim,
                                 layout const& weights_layout,
                                 bool output_size_handling_enabled) {
     // cases when NOT to use winograd
+    GPU_DEBUG_GET_INSTANCE(debug_config);
+    GPU_DEBUG_IF(debug_config->disable_winograd_convolution == 1)
+        return false;
     if (input_layout.data_type != data_types::f16
         || input_layout.feature() % 64 != 0  // current algorithm is effective for ifm to be multiply of 64
         || weights_layout.spatial(0) != 3     // weights have to be 3x3 by definiton

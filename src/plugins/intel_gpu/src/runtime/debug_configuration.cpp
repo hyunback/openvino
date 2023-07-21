@@ -137,6 +137,7 @@ static void print_help_messages() {
                               "the following order: number of iterations for pre-allocation(int), max size of single iteration in bytes(int), "
                               "max per-dim allowed diff(int), unconditional buffers preallocation ratio(float). For example for disabling memory"
                               "preallocation at all, you can use OV_GPU_MemPreallocationOptions='0 0 0 1.0'");
+    message_list.emplace_back("OV_GPU_DisableWinogradConv", "Disable Winograd convolution");
 
     auto max_name_length_item = std::max_element(message_list.begin(), message_list.end(),
         [](std::pair<std::string, std::string>& a, std::pair<std::string, std::string>& b){
@@ -173,7 +174,8 @@ debug_configuration::debug_configuration()
         , base_batch_for_memory_estimation(-1)
         , serialize_compile(0)
         , max_kernels_per_batch(0)
-        , disable_async_compilation(0) {
+        , disable_async_compilation(0)
+        , disable_winograd_convolution(0) {
 #ifdef GPU_DEBUG_CONFIG
     get_gpu_debug_env_var("Help", help);
     get_common_debug_env_var("Verbose", verbose);
@@ -206,6 +208,7 @@ debug_configuration::debug_configuration()
     get_gpu_debug_env_var("DumpIteration", dump_iteration_str);
     std::string mem_preallocation_params_str;
     get_gpu_debug_env_var("MemPreallocationOptions", mem_preallocation_params_str);
+    get_gpu_debug_env_var("DisableWinogradConv", disable_winograd_convolution);
 
     if (help > 0) {
         print_help_messages();
