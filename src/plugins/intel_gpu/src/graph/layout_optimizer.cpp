@@ -501,6 +501,7 @@ bool should_use_winograd_2x3_s1(std::shared_ptr<const convolution> const& prim,
                                 layout const& weights_layout,
                                 bool output_size_handling_enabled) {
     // cases when NOT to use winograd
+    return false;   // ci test for force disable winograd.
     GPU_DEBUG_GET_INSTANCE(debug_config);
     GPU_DEBUG_IF(debug_config->disable_winograd_convolution == 1)
         return false;
