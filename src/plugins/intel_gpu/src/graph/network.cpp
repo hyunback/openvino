@@ -1155,7 +1155,6 @@ std::map<primitive_id, network_output> network::execute(const std::vector<event:
     return result;
 }
 
-
 void network::execute_impl(const std::vector<event::ptr>& events) {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "NetworkImpl::Execute");
     // Wait for previous execution completion
@@ -1243,7 +1242,53 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
                 }
             }
         }
+#if 0
+        // show convolutions whether winograd acceptable or not.
+        if (inst->get_node().is_type<convolution>()) {
+            auto& node = inst->get_node();
+            auto& conv_node = node.as<convolution>();
+            auto prim = conv_node.get_primitive();
+            auto i_l = conv_node.get_dependency(0).get_output_layout();
+            auto w_l = conv_node.get_dependency(1).get_output_layout();
 
+            auto should_use_winograd_2x3_s1 = [](std::shared_ptr<const convolution> const& prim,
+                                                    layout const& input_layout,
+                                                    layout const& weights_layout) -> int {
+                // cases when NOT to use winograd
+                if (input_layout.data_type != data_types::f16)  return 1;
+                if (input_layout.feature() % 64 != 0)   return 2;       // current algorithm is effective for ifm to be multiply of 64
+                if (weights_layout.spatial(0) != 3)     return 3;       // weights have to be 3x3 by definiton
+                if (weights_layout.spatial(1) != 3)     return 4;       // weights have to be 3x3 by definition
+                if (weights_layout.batch() % 64 != 0)   return 5;       // current algorithm is effective for ofm to be multiply of 64
+                if (any_not_one(prim->stride))          return 6;       // stride has to be 1x1 by definition
+                if (any_not_one(prim->dilation))        return 7;       // no support for dilation
+                    // || output_size_handling_enabled                  // This condition is weird. Need to revise it and replace with something meaningful
+                if (input_layout.count() > 3000000)     return 8;       // limit max input size as winograd consumes more memory
+                if (input_layout.count() < 50000)       return 9;       // limit min input size as winograd is not effective for small input
+                if (input_layout.spatial(0) < 8 && input_layout.spatial(1) < 8) return 10;      // disable winograd for small spatials as perf is poor
+                if (prim->groups != 1)                  return 10;      // disable winograd for groups
+                return 0;
+            };
+            auto ret = should_use_winograd_2x3_s1(prim, i_l, w_l);
+
+            if (ret == 0 && node.get_fused_primitives().empty()) {
+                GPU_DEBUG_COUT << conv_node.id() << " : "
+                                << conv_node.get_selected_impl()->get_kernel_name() << " : " << conv_node.get_output_layout().to_short_string() << std::endl;
+
+                for (const auto& i : conv_node.get_dependencies()) {
+                    GPU_DEBUG_COUT << "     " <<  i.first->id() << " : " << i.first->get_output_layout().to_short_string() << std::endl;
+                }
+            } else {
+                if (!node.get_fused_primitives().empty()) ret = 11;
+                std::cout << ret << " : " << conv_node.id() << " : "
+                                << conv_node.get_selected_impl()->get_kernel_name() << " : " << conv_node.get_output_layout().to_short_string() << std::endl;
+
+                for (const auto& i : conv_node.get_dependencies()) {
+                    std::cout << "     " <<  i.first->id() << " : " << i.first->get_output_layout().to_short_string() << std::endl;
+                }
+            }
+        }
+#endif
         execute_primitive(inst, events);
 
         GPU_DEBUG_IF(debug_config->dump_layers_path.length() > 0) {

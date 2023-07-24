@@ -491,6 +491,7 @@ void prepare_primitive_fusing::fuse_simple_primitives(program &p) {
         };
 
         auto conv_supports_fusings = [&](convolution_node& node) -> bool {
+            return false;   // for test wino conv
             if (_lo.get_optimization_attributes().use_onednn_impls == 1)
                 return true;
 

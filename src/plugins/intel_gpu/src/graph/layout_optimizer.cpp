@@ -515,8 +515,8 @@ bool should_use_winograd_2x3_s1(std::shared_ptr<const convolution> const& prim,
         || output_size_handling_enabled            // This condition is weird. Need to revise it and replace with something meaningful
         || (input_layout.count() > 3000000)        // limit max input size as winograd consumes more memory
         || (input_layout.count() < 50000)          // limit min input size as winograd is not effective for small input
-        || (input_layout.spatial(0) < 8 &&
-            input_layout.spatial(1) < 8)      // disable winograd for small spatials as perf is poor
+        || (input_layout.spatial(0) < 32 &&     // mytest: 8 to 32, winograd_6x3_s1_fused has poor perf under 32.
+            input_layout.spatial(1) < 32)      // disable winograd for small spatials as perf is poor
         || prim->groups != 1) {                    // disable winograd for groups
         return false;
     }
@@ -1089,6 +1089,9 @@ format layout_optimizer::get_expected_format(convolution_node const& node) {
         } else if (_optimization_attributes.bs_fs_yx_bsv16_fsv16_network &&
                 convolution_bs_fs_yx_bsv16_fsv16_opt(node.input().get_output_layout(), output_layout, weights_layout, prim)) {
             expected_format = cldnn::format::bs_fs_yx_bsv16_fsv16;
+        } else if (should_use_winograd_2x3_s1(node.get_primitive(), input_layout, weights_layout, _output_size_handling_enabled) &&
+                     (node.get_fused_primitives().empty())) {
+            expected_format = cldnn::format::byxf;
         } else if (_optimization_attributes.fs_b_yx_fsv32_network && !node.get_transposed() &&
                 ((convolution_fs_b_yx_fsv32_opt(input_layout,
                                                 output_layout,

@@ -285,6 +285,10 @@ std::map<std::string, std::string> parse_value_per_device(const std::vector<std:
 size_t get_batch_size(const benchmark_app::InputsInfo& inputs_info) {
     size_t batch_size = 0;
     for (auto& info : inputs_info) {
+        // if (info.first.find("latent_model_input") != std::string::npos) {
+        //     batch_size = 1;
+        //     continue;
+        // }
         if (ov::layout::has_batch(info.second.layout)) {
             if (batch_size == 0)
                 batch_size = info.second.batch();

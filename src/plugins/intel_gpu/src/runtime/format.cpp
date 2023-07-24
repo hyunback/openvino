@@ -38,7 +38,7 @@ static const std::map<format::type, format_traits> format_traits_map {
         FMT_TRAITS(bs_fs_fsv8_bsv8,       1, 1, 0, 0, {0, 1},                   "bf",       "bf",       {{0, 8}, {1, 8}}),
         FMT_TRAITS(bs_fs_fsv8_bsv16,      1, 1, 0, 0, {0, 1},                   "bf",       "bf",       {{0, 16}, {1, 8}}),
         FMT_TRAITS(bs_f_bsv16,            1, 1, 0, 0, {0, 1},                   "bf",       "bf",       {{0, 16}}),
-        FMT_TRAITS(winograd_2x3_s1_data,  1, 1, 2, 0, {0, 2, 3, 1},             "bxyf",     "bfxy",     {}),
+        FMT_TRAITS(winograd_2x3_s1_data,  1, 1, 2, 0, {0, 2, 3, 1},             "bxyf",     "bfxy",     {}),    // byxf
         FMT_TRAITS(bzyxf,                 1, 1, 3, 0, {0, 2, 3, 4, 1},          "bzyxf",    "bfxyz",    {}),
         FMT_TRAITS(bfzyx,                 1, 1, 3, 0, {0, 1, 2, 3, 4},          "bfzyx",    "bfxyz",    {}),
         FMT_TRAITS(bfwzyx,                1, 1, 4, 0, {0, 1, 2, 3, 4, 5},       "bfwzyx",   "bfxyzw",   {}),

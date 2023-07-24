@@ -114,7 +114,7 @@ ConvolutionKernel_Winograd_6x3_s1_fused::Parent::DispatchData ConvolutionKernel_
 
     dispatchData.gws[0] = ((uint32_t)((Q + global_step[0] - 1)) / global_step[0]) * local_size[0];
     dispatchData.gws[1] = ((uint32_t)((P + global_step[1] - 1)) / global_step[1]) * local_size[1];
-    dispatchData.gws[2] = ((uint32_t)((N * K * 8 + global_step[2] - 1)) / global_step[2]) * local_size[2];
+    dispatchData.gws[2] = ((uint32_t)((N * K * 8 + global_step[2] - 1)) / global_step[2]) * local_size[2] * arg.inputs[0].Batch().v;
 
     dispatchData.lws[0] = local_size[0];
     dispatchData.lws[1] = local_size[1];
@@ -138,9 +138,9 @@ bool ConvolutionKernel_Winograd_6x3_s1_fused::Validate(const Params& p, const op
         (params.stride.y != 1) || (params.filterSize.x != 3) || (params.filterSize.y != 3) ||
         (params.outputs[0].Feature().v % 32) || (params.inputs[0].Feature().v % 32) ||
         (params.outputs[0].Feature().pad.before != 0) || (params.outputs[0].Feature().pad.after != 0) ||
-        (params.outputs[0].Batch().pad.before != 0) || (params.outputs[0].Batch().pad.after != 0) ||
+        (params.outputs[0].Batch().pad.before != 0) || (params.outputs[0].Batch().pad.after != 0)) { //||
         // TODO: add support to batch > 1
-        (params.inputs[0].Batch().v != 1)) {
+        // (params.inputs[0].Batch().v != 1)) {
         return {};
     }
 
