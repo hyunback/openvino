@@ -153,8 +153,7 @@ program::program(engine& engine_ref,
       _compilation_context(compilation_context) {
     _config.apply_user_properties(_engine.get_device_info());
     init_primitives();
-    ov::Core core;
-    GPU_DEBUG_INFO << core.get_versions("GPU");
+    GPU_DEBUG_INFO << ov::Core().get_versions("GPU");
     GPU_DEBUG_INFO << "Driver: " << _engine.get_device_info().driver_version << std::endl;
     GPU_DEBUG_INFO << "Program config\n" << config.to_string();
     init_program();
