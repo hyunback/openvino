@@ -216,6 +216,8 @@ void ExecutionConfig::apply_user_properties(const cldnn::device_info& info) {
     if (info.supports_immad) {
         set_property(ov::intel_gpu::queue_type(QueueTypes::in_order));
     }
+    // test for LCM
+    set_property(ov::intel_gpu::queue_type(QueueTypes::in_order));
 
     user_properties.clear();
 }

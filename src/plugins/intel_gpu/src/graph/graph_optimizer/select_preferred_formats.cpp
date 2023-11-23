@@ -28,14 +28,16 @@ void select_preferred_formats::run(program& p) {
     auto& engine = p.get_engine();
     const auto& device_info = engine.get_device_info();
 
-    if (!device_info.supports_immad)
-        return;
+    // if (!device_info.supports_immad)
+    //     return;
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
     auto forcing_map = _lo.get_implementation_forcing();
 
     engine.create_onednn_engine(p.get_config());
     for (auto n : p.get_processing_order()) {
+        if (!device_info.supports_immad && (!n->is_type<gemm>()))
+            return;
         if (n->is_input() || !layout_optimizer::is_node_suitable_for_onednn(*n)) {
             continue;
         }

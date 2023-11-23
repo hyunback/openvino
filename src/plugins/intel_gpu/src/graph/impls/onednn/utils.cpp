@@ -358,6 +358,9 @@ cldnn::format find_format(dnnl::memory::desc desc, bool is_grouped) {
         }
     }
 
+    // // LCM test, ignore new weight format, just check Perf
+    // return start_format;
+
     std::stringstream msg;
     msg << "Unsupported " << (is_grouped ? "grouped" : "") << "onednn dnnl::memory::desc find_format. "
         << "ndims: " << desc.get_ndims()
