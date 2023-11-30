@@ -38,6 +38,7 @@ GemmKernelBase::DispatchData GemmKernelBase::SetDefault(const gemm_params& param
 KernelsData GemmKernelBase::GetCommonKernelsData(const Params& params,
                                                  const optional_params& options) const {
     if (!Validate(params, options)) {
+        GPU_DEBUG_COUT << "validation failed" << std::endl;
         return KernelsData();
     }
 

@@ -59,12 +59,17 @@ GemmKernelBase::DispatchData GemmKernelTiledOpt::SetDefault(const gemm_params& p
         std::vector<size_t> global = { output.X().v, output.Y().v, total_batches };
 
         dispatchData.gws[0] = Align(global[0], td.tile_n_size) / (td.tile_n_size / td.simd_size);
+        // dispatchData.gws[1] = Align(global[1], td.tile_m_size) / (td.tile_m_size / td.simd_size);
         dispatchData.gws[1] = Align(global[1], td.tile_m_size) / td.tile_m_size;
         dispatchData.gws[2] = global[2];
 
         dispatchData.lws[0] = td.simd_size;
-        dispatchData.lws[1] = 1;
+        dispatchData.lws[1] = td.simd_size;
         dispatchData.lws[2] = 1;
+
+        GPU_DEBUG_COUT << "[" << global[0] << ", " << global[1] << ", " << global[2] << "], " << std::endl;
+        GPU_DEBUG_COUT << "[" << dispatchData.gws[0] << ", " << dispatchData.gws[1] << ", " << dispatchData.gws[2] << "], "
+                        <<"[" << dispatchData.lws[0] << ", " << dispatchData.lws[1] << ", " << dispatchData.lws[2] << "], " << std::endl;
     }
     return dispatchData;
 }
@@ -104,6 +109,12 @@ GemmKernelTiledOpt::GemmTuningData GemmKernelTiledOpt::SetTuningParams(const gem
             tuning_data.tile_k_size = tuning_data.simd_size;
             tuning_data.tile_m_size = tuning_data.simd_size;
         }
+        if (m_size == 4096 && tuning_data.simd_size == 16)
+            tuning_data.tile_m_size = 32;
+        if (k_size == 4096 && tuning_data.simd_size == 16)
+            tuning_data.tile_k_size = 32;
+        if (n_size == 4096 && tuning_data.simd_size == 16)
+            tuning_data.tile_n_size = 32;
         int val;
         if (get_env("MY_SIMD", val))
             tuning_data.simd_size = val;
@@ -113,12 +124,6 @@ GemmKernelTiledOpt::GemmTuningData GemmKernelTiledOpt::SetTuningParams(const gem
             tuning_data.tile_m_size = val;
         if (get_env("MY_TILE_K", val))
             tuning_data.tile_k_size = val;
-        if (m_size == 4096 && tuning_data.simd_size == 16)
-            tuning_data.tile_m_size = 32;
-        if (k_size == 4096 && tuning_data.simd_size == 16)
-            tuning_data.tile_k_size = 32;
-        if (n_size == 4096 && tuning_data.simd_size == 16)
-            tuning_data.tile_n_size = 32;
 
         if (k_size == 4096 || m_size == 4096) {
             printf("%d %d %d %d %d\n",
@@ -127,7 +132,8 @@ GemmKernelTiledOpt::GemmTuningData GemmKernelTiledOpt::SetTuningParams(const gem
                 params.transpose_input0,
                 params.transpose_input1,
                 !IsSIMDSizeSupported(params.engineInfo, 8));
-            std::cout << "tile_m_size " << tuning_data.tile_m_size << ", tile_n_size " << tuning_data.tile_n_size << ", tile_k_size " << tuning_data.tile_k_size << std::endl;
+            GPU_DEBUG_COUT << "tile_m_size " << tuning_data.tile_m_size << ", tile_n_size "
+                            << tuning_data.tile_n_size << ", tile_k_size " << tuning_data.tile_k_size << std::endl;
         }
     } else {
         // In shape agnostic kernel case, the vector size of FusedOpsConfiguration cannot be specified at build time,
@@ -293,6 +299,7 @@ bool GemmKernelTiledOpt::Validate(const Params& params, const optional_params& o
         if (gmm_params.inputs[0].GetDType() != gmm_params.inputs[i].GetDType())
             return false;
 
+    GPU_DEBUG_COUT << "GemmKernelTiledOpt::Validate true" << std::endl;
     return true;
 }
 }  // namespace kernel_selector

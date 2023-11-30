@@ -63,7 +63,7 @@ inline uint FUNC(get_output_batch_offset)(OPTIONAL_SHAPE_INFO_ARG uint b, uint f
 
 // Optimized gemm kernel for fp16/fp32 inputs
 REQD_SUB_GROUP_SIZE(SIMD_WIDTH)
-__attribute__((reqd_work_group_size(SIMD_WIDTH, 1, 1)))
+__attribute__((reqd_work_group_size(SIMD_WIDTH, SIMD_WIDTH, 1)))
 KERNEL(gemm_tiled_opt)(
     OPTIONAL_SHAPE_INFO_ARG
     const __global INPUT0_TYPE* input0,
@@ -77,8 +77,12 @@ KERNEL(gemm_tiled_opt)(
 #endif // HAS_FUSED_OPS_DECLS
     )
 {
+    // printf("%ld, %ld, %ld, %ld, %ld, %ld, %ld, %ld, %ld\n", (uint)get_group_id(0), (uint)get_group_id(1), (uint)get_group_id(2),
+    //                                                         (uint)get_local_id(0), (uint)get_local_id(1), (uint)get_local_id(2),
+    //                                                         (uint)get_global_size(0), (uint)get_global_size(0), (uint)get_global_size(0));
     const uint tile_n_num = (uint)get_group_id(0);
-    const uint tile_m_num = (uint)get_group_id(1);
+    // const uint tile_m_num = (uint)get_group_id(1);
+    const uint tile_m_num = (uint)get_local_id(1);
     const uint tile_m_size = (uint)get_global_size(1);
     const uint tile_m_offset = tile_m_num * TILE_M;
     const uint tile_n_offset = tile_n_num * TILE_N;
