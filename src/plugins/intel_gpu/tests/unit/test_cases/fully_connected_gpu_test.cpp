@@ -1056,15 +1056,17 @@ public:
         // long int scales_group_size = 128;
 
         long int batch_num = 1;
-        long int ifm_num = 4096;  //13696; // 4096;
-        long int ofm_num = 27392; // 4096;  // 27392;
-        long int scales_group_size = 1;
-        // long int scales_group_size = 32;
+        long int ifm_num = 256;
+        long int ofm_num = 256;
+        // long int scales_group_size = 1;
+        long int scales_group_size = 32;
 
-        ifm_num = 16;
-        ofm_num = 32;
+        // ifm_num = 16;
+        // ofm_num = 128;  // FT:4
         // ifm_num = 13696;
         // ofm_num = 4096;
+        ifm_num = 4096;
+        ofm_num = 27392;
 
         auto input_mem = engine.allocate_memory({ { batch_num, ifm_num}, data_types::f16, format::bfyx });
         auto weights_mem = engine.allocate_memory({ {ofm_num, ifm_num}, data_types::u4, format::bfyx });
@@ -1077,8 +1079,8 @@ public:
         // auto weigths_data = rg.generate_random_1d<uint8_t>(ofm_num * ifm_num / 2, 1, 1);
         set_values(weights_mem, weigths_data);
 
-        // auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, -4.0f, 4.0f);
-        auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, 1.0f, 1.0f);
+        auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, -4.0f, 4.0f);
+        // auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, 1.0f, 1.0f);
         set_values(scale_mem, scale_data);
 
         auto in_layout = is_dynamic ? layout{ {-1, ifm_num}, data_types::f16, format::bfyx }
@@ -1156,7 +1158,7 @@ public:
             count++;
             // ASSERT_FLOAT_EQ(output_ptr_ref[i], output_ptr[i]) << "i = " << i;
             // if (i < 10)
-            std::cout << i << " : " << output_ptr_ref[i] << " : " << output_ptr[i] << std::endl;
+            // std::cout << i << " : " << output_ptr_ref[i] << " : " << output_ptr[i] << std::endl;
         }
         std::cout << "---> count: " << count << ", max_diff:" << max_diff << ", avg_diff: " << (avg/count) << std::endl;
     }

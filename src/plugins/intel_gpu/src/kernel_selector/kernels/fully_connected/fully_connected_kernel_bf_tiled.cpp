@@ -255,14 +255,14 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
 
     if (params.weights.GetDType() == WeightsType::UINT4 || params.weights.GetDType() == WeightsType::INT4) {
         if (!params.is_shape_agnostic && batch == 1) {
-            // return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
-            if ((params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696) ||
-                (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) ||
-                (params.outputs[0].Feature().v == 32 && params.inputs[0].Feature().v == 16)) {
-                return selector.Default(tune_params(1, 1, 1, 8, 1, 1, EXE_MODE_DEFAULT));
-            } else {
-                return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
-            }
+            return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));   // Let's fixed tiling size.
+            // if ((params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696) ||
+            //     (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) ||
+            //     (params.outputs[0].Feature().v == 32 && params.inputs[0].Feature().v == 16)) {
+            //     return selector.Default(tune_params(1, 1, 1, 8, 1, 1, EXE_MODE_DEFAULT));
+            // } else {
+            //     return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+            // }
         } else {
             // Try to use SLM kernels if possible
             if (preffered_kernel_type != KernelType::DEFAULT) {
@@ -347,7 +347,7 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
         kernel_type = kernel_number == 0 ? KernelType::DEFAULT : KernelType::SLM;
 
     auto tparams = GetAutoTuneParams(params, kernel_type, autoTuneIndex);
-
+#if 0
     if (params.outputs[0].Batch().v == 1 && !params.is_shape_agnostic) {
         if ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
             (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) {
@@ -383,6 +383,7 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
 #endif
         }
     }
+#endif
 
     size_t feature_threads = CeilDiv(params.outputs[0].Feature().v, tparams.tile_ofm * simd);
     size_t batch_threads = params.outputs[0].Batch().v;
@@ -451,6 +452,8 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
         tile_k_ofm_packed /= 2;
 
         jit.Merge(make_int4_packed_type_jit_constant("INT4_PACKED_TYPE", weights_dt, tile_k_ofm));
+        GPU_DEBUG_INFO << "scale_group_size = params.weights.IFM().v: " << params.weights.IFM().v
+                        << " / params.decompression_scale.Feature().v: " << params.decompression_scale.Feature().v << std::endl;
         const size_t scale_group_size = params.weights.IFM().v / params.decompression_scale.Feature().v;
         GPU_DEBUG_INFO << "scale_group_size: " << scale_group_size << std::endl;
         // Do not use SCALE_POST_OP for SLM kernel, since it demonstrates worse performance
@@ -606,13 +609,20 @@ KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &pa
     tune_params tparams = GetAutoTuneParams(fc_params, KernelType::ANY, autoTuneIndex);
 
     WeightsLayout weights_layout = WeightsLayout::os_iyx_osv16;
+#if 0
+    // WeightsLayout weights_layout = WeightsLayout::os_iyx_osv32;
     // WeightsLayout weights_layout = WeightsLayout::oiyx;
     if (tparams.tile_ofm == 1 && tparams.tile_ifm == 1 && tparams.tile_k == 8)
-        weights_layout = WeightsLayout::oiyx; // my test
+        // weights_layout = WeightsLayout::oiyx; // my test
+        weights_layout = WeightsLayout::os_iyx_osv32;
     else if (tparams.tile_ofm * simd == 32)
+#else
+    if (tparams.tile_ofm * simd == 32)
+#endif
         weights_layout = WeightsLayout::os_iyx_osv32;
     else if (tparams.tile_ofm * simd == 64)
         weights_layout = WeightsLayout::os_iyx_osv64;
+
 
     auto kernels_data = GetCommonKernelsData(params,
                                              options,
