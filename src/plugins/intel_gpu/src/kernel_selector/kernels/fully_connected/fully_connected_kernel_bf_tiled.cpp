@@ -400,6 +400,10 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
     // GPU_DEBUG_INFO << "feature_threads: " << feature_threads << std::endl;
     dispatchData.gws[0] = can_use_slm ? feature_threads * simd
                                       : feature_threads * batch_threads * simd;
+    if (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) {
+        dispatchData.gws[0] /= 4;   // outer_loop
+    }
+
     dispatchData.gws[1] = 1;
     dispatchData.gws[2] = can_use_slm ? aligned_batch : 1;
 

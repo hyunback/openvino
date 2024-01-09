@@ -494,6 +494,13 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
     uint gid1 = (uint)get_group_id(1);
     uint gid2 = (uint)get_group_id(2);
 
+#if FILTER_OFM_NUM == 27392 && FILTER_IFM_NUM == 4096
+// outer_loop start // FT:856
+for (uint ol = 0; ol < 4; ++ol) {
+    gid = 4 * gid0 + ol;
+#endif
+
+
     // if (gid0 ==0 && gid1 == 0 && gid2 == 0 && ggid0 == 0 && ggid1 == 0 && ggid2 == 0 &&
     //     llid0 == 0 && llid1 == 0 && llid2 == 0) {
     //     int i;
@@ -1008,6 +1015,9 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
             output_offset += TILE_OUT_B_PITCH - TILE_OFM * SIMD;
         }
     }
+#if FILTER_OFM_NUM == 27392 && FILTER_IFM_NUM == 4096
+}   // outer_loop end
+#endif
     // =====================================================================================================================================
 }
 
