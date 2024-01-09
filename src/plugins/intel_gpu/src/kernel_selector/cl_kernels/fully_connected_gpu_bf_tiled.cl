@@ -484,6 +484,16 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #endif
     uint sglid = (uint)get_sub_group_local_id();
 
+    uint ggid0 = (uint)get_global_id(0);
+    uint ggid1 = (uint)get_global_id(1);
+    uint ggid2 = (uint)get_global_id(2);
+    uint llid0 = (uint)get_local_id(0);
+    uint llid1 = (uint)get_local_id(1);
+    uint llid2 = (uint)get_local_id(2);
+    uint gid0 = (uint)get_group_id(0);
+    uint gid1 = (uint)get_group_id(1);
+    uint gid2 = (uint)get_group_id(2);
+
     // Dispatch as bs_fs_bsv_fsv, where bsv = DISPATCH_BSV and fsv = DISPATCH_FSV.
     // This allows more fine grained control over dispatch order than using work-groups and
     // avoids requirement of threads being available for whole work-group.
@@ -499,6 +509,8 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
     uint out_b = LWS_BATCHES * TILE_B * (uint)get_group_id(2) + local_id * TILE_B;
 #else
     uint out_f = (feature_mega_block * DISPATCH_FSV + feature_mini_block) * (TILE_OFM * SIMD);
+    // uint out_f = gid0;
+    // uint out_f = 0;
     uint out_b = ((batch_mega_block * DISPATCH_BSV + batch_mini_block) * TILE_B);
 #endif
 
@@ -515,6 +527,9 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #else
     uint weights_offset = out_f * INPUT_ELEMENTS_COUNT;
 #endif
+    // printf("%2d %2d %2d : %2d %2d %2d : %2d %2d %2d : %2d %2d %2d %2d : %3d %3d\n",
+    //         gid0, gid1, gid2, ggid0, ggid1, ggid2, llid0, llid1, llid2,
+    //         feature_mega_block, batch_mega_block, out_f, out_b, input_offset, weights_offset);
 
 #if COMPRESSED_WEIGHTS && DECOMPRESSION_SCALE_GROUPS_NUM == 1
     #if DECOMPRESSION_SCALE_LENGTH > 1 && DECOMPRESSION_SCALE_LENGTH % (TILE_OFM * SIMD) == 0
@@ -674,6 +689,9 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
             barrier(CLK_LOCAL_MEM_FENCE);
         #endif
 
+        // a) 2, 1, 4 vs b) 1, 1, 8
+        // a) ki = 0, 1, 2, 3
+        // b) ki = 0, 1
         unroll_for(uint ki = 0; ki < (TILE_IFM * SIMD) / TILE_K; ++ki) {
             #if COMPRESSED_WEIGHTS_INT4
                 #if USE_SLM
@@ -696,6 +714,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                 #else
                     FILTER_PACKED_VEC_TYPE wei_packed = FILTER_BLOCK_READ(weights, weights_offset);
                     wei = UNPACK_INT4x2(ACCUMULATOR_TYPE, *((INT4_PACKED_TYPE*)&wei_packed));
+                    printf("%d %d %p / %p / %p\n", sglid, weights_offset, weights, &wei_packed, &wei);
                 #endif
             #else
                 wei = TO_FILTER_VEC_TYPE(FILTER_BLOCK_READ(weights, weights_offset));
@@ -737,8 +756,23 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                     }
                 }
             #endif
+            int cur_weights_offset = weights_offset;
             weights_offset += TILE_K_OFM_PACKED * SIMD;
+            printf("%p %p %p : %f %f %f %f %f %f %f %f - %d %d %d - %d %d %d - %d %d %d - %d %d %d %d %d\n",
+                    &w[0], &w[1], &w[5], w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7],
+                    gid0, gid1, gid2, ggid0, ggid1, ggid2, llid0, llid1, llid2,
+                    sglid, ni, ki, cur_weights_offset, weights_offset);
+            // if (sglid == 0) {
+            //     for (size_t i = 0; i < 64; i++) {
+            //         printf("%d: %f %f %f %f %f %f %f %f\n", i, w[8*i+0], w[8*i+1], w[8*i+2], w[8*i+3], w[8*i+4], w[8*i+5], w[8*i+6], w[8*i+7]);
+            //     }
+            // }
 
+            // a)2,1,4 vs b)1,1,8
+            // a) kii = 0, 1, 2 ,3
+            //    fi  = 0, 1
+            // b) kii = 0, 1, 2, 3, 4, 5, 6, 7
+            //    fi  = 0
             unroll_for (uint kii = 0; kii < TILE_K; ++kii) {
                 const uint total_k = ki * TILE_K + kii;
                 unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
@@ -748,12 +782,22 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                         ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[kii * TILE_OFM + fi];
 #else
                         ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[kii * TILE_OFM + fi];
+                        // ((ACCUMULATOR_TYPE*)(&acc[bi]))[gid0] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[kii * TILE_OFM * 2 + gid0];
+                        // if (sglid == 0)
+                        {
+                            printf("%2d %2d %2d : %2d %2d %2d : %2d %2d %2d : %2d %2d %2d %2d %2d %3d : %7.3f += %7.3f * %7.3f\n",
+                                    gid0, gid1, gid2, ggid0, ggid1, ggid2, llid0, llid1, llid2,
+                                    sglid, ki, kii, fi, (kii * TILE_OFM + fi), cur_weights_offset,
+                                    ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi], in_val, ((ACCUMULATOR_TYPE*)(&wei))[kii * TILE_OFM + fi]);
+                        }
+
 #endif
                     }
                 }
             }
         }
 #if DECOMPRESSION_SCALE_POST_OP
+        printf("DECOMPRESSION_SCALE_POST_OP\n");
         unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
             unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
                 const uint offset_ofm = out_f + fi*SIMD + sglid;
@@ -828,6 +872,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                 }
             #endif
             weights_offset += TILE_K_OFM_PACKED * SIMD;
+            // printf("leftover weights_offset: %d\n", weights_offset);
 
             unroll_for (uint kii = 0; kii < TILE_K; ++kii) {
                 unroll_for (uint fi = 0; fi < TILE_OFM; ++fi) {
@@ -849,9 +894,14 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
     ACTIVATION_VEC_TYPE activated[TILE_B] = { };
     for (uint bi = 0; bi < TILE_B; ++bi) {
         activated[bi] = TO_ACTIVATION_VEC_TYPE(acc[bi]);
+        // unroll_for (uint fi = 0; fi < TILE_OFM; ++fi) {
+        //     printf("%2d %2d %2d : %2d %2d %2d : %2d %2d %2d : %2d %2d : %f\n",
+        //             gid0, gid1, gid2, ggid0, ggid1, ggid2, llid0, llid1, llid2, sglid, fi, ((ACCUMULATOR_TYPE*)(&activated[bi]))[fi]);
+        // }
     }
 
 #if BIAS_TERM
+    // printf("BIAS_TERM\n");
     #if TILE_OUT_F_NUM % (TILE_OFM * SIMD) == 0
         BIAS_VEC_TYPE bias = BIAS_BLOCK_READ(biases, out_f);
     #else
@@ -867,6 +917,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 
     OUTPUT_VEC_TYPE result[TILE_B] = { };
 #if HAS_FUSED_OPS
+    // printf("HAS_FUSED_OPS\n");
     unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
     #if TILE_OFM > 1
         unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
@@ -936,6 +987,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                     out_f + fi * SIMD + sglid < TILE_OUT_F_NUM);
                 if (should_write) {
                     output[output_offset] = ((OUTPUT_TYPE*)(&result[bi]))[fi];
+                    // printf("%f %d\n", output[output_offset], output_offset);
                 }
                 output_offset += SIMD;
             }

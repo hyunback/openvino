@@ -74,6 +74,7 @@ KERNEL(fc)(
 #else
     const uint ofm = get_global_id(0);
     const uint b = get_global_id(1);
+    // printf("%d %d\n", ofm, INPUT0_FEATURE_NUM);
 
     ACCUMULATOR_TYPE dotProd = ACCUMULATOR_VAL_ZERO;
 
@@ -99,7 +100,7 @@ KERNEL(fc)(
                     DECOMPRESSION_SCALE_TYPE scale = decompression_scale[decomp_offset];
                 #endif
 
-                    const uint filter_idx = GET_FILTER_INDEX(FILTER, 0, ofm, ifm, y, x);
+                    const uint filter_idx = GET_FILTER_INDEX(FILTER, 0, ofm, ifm, y, x);    // FILTER, 0, ofm, i
                 #if COMPRESSED_WEIGHTS_INT8
                     FILTER_TYPE filter_compressed = weights[filter_idx];
                     ACCUMULATOR_TYPE filter_val = (TO_ACCUMULATOR_TYPE(filter_compressed) - zp) * scale;
@@ -111,12 +112,15 @@ KERNEL(fc)(
                     ACCUMULATOR_TYPE filter_compressed = ((ACCUMULATOR_TYPE*)(&filter_unpacked))[filter_idx % 2];
                     ACCUMULATOR_TYPE filter_val = (filter_compressed - zp) * scale;
                     dotProd += (ACCUMULATOR_TYPE)(input[input0_idx]) * filter_val;
+                    // printf("%2d %2d %2d %2d / %2d %2d / %f\n", ofm, ifm, y, x, input0_idx, filter_idx, filter_val);
+                    // printf("%f ",filter_val);
                 #else
                     dotProd += (ACCUMULATOR_TYPE)(input[input0_idx]) * (ACCUMULATOR_TYPE)(weights[filter_idx]);
                 #endif
             }
         }
     }
+
 
     const uint dst_index = OUTPUT_GET_INDEX(b, ofm, 0, 0);
 #endif

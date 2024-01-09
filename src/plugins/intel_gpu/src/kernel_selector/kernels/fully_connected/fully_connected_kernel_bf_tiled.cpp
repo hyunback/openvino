@@ -221,6 +221,7 @@ bool TuneParamsSelector::VerifyTuneParams(const fully_connected_params& params, 
 
 FullyConnected_bf_tiled::tune_params
 FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params, KernelType preffered_kernel_type, int idx) const {
+    GPU_DEBUG_INFO << "GetAutoTuneParams START" << std::endl;
     if (idx >= 0 && idx < static_cast<int>(auto_tune_params.size())
         && TuneParamsSelector::VerifyTuneParams(params, auto_tune_params[idx]))
         return auto_tune_params[idx];
@@ -228,6 +229,17 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
     size_t batch = params.outputs[0].Batch().v;
     size_t output_f = params.outputs[0].Feature().v;
 
+    GPU_DEBUG_INFO << params.layerID << std::endl;
+    GPU_DEBUG_INFO << "is_shape_agnostic: " << params.is_shape_agnostic << std::endl;
+    for (size_t i = 0; i < params.inputs.size(); i++) {
+        GPU_DEBUG_INFO << "[" << params.inputs[i].Batch().v << ", " << params.inputs[i].Feature().v << ", "
+                        << params.inputs[i].Y().v << ", " << params.inputs[i].X().v << "]" << std::endl;;
+    }
+    for (size_t i = 0; i < params.outputs.size(); i++) {
+        GPU_DEBUG_INFO << "[" << params.outputs[i].Batch().v << ", " << params.outputs[i].Feature().v << ", "
+                        << params.outputs[i].Y().v << ", " << params.outputs[i].X().v << "]" << std::endl;
+    }
+    GPU_DEBUG_INFO << "GetAutoTuneParams END" << std::endl;
     // 3d output
     if (params.outputs[0].GetLayout() == DataLayout::bfyx) {
         batch *= params.outputs[0].Feature().v;
@@ -243,7 +255,14 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
 
     if (params.weights.GetDType() == WeightsType::UINT4 || params.weights.GetDType() == WeightsType::INT4) {
         if (!params.is_shape_agnostic && batch == 1) {
-            return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+            // return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+            if ((params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696) ||
+                (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) ||
+                (params.outputs[0].Feature().v == 32 && params.inputs[0].Feature().v == 16)) {
+                return selector.Default(tune_params(1, 1, 1, 8, 1, 1, EXE_MODE_DEFAULT));
+            } else {
+                return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+            }
         } else {
             // Try to use SLM kernels if possible
             if (preffered_kernel_type != KernelType::DEFAULT) {
@@ -317,6 +336,7 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
 
 FullyConnected_bf_tiled::DispatchData
 FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int autoTuneIndex, int kernel_number) const {
+    GPU_DEBUG_INFO << "SetDefault START" << std::endl;
     auto dispatchData = Parent::SetDefault(params);
 
     // Use KernelType::ANY by default, in case of shape-agnostic kernel, choose kernel type based
@@ -327,6 +347,42 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
         kernel_type = kernel_number == 0 ? KernelType::DEFAULT : KernelType::SLM;
 
     auto tparams = GetAutoTuneParams(params, kernel_type, autoTuneIndex);
+
+    if (params.outputs[0].Batch().v == 1 && !params.is_shape_agnostic) {
+        if ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+            (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) {
+                // selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+#if 1
+                tparams.tile_ofm = 8;
+                tparams.tile_ifm = 8;
+                tparams.tile_k = 1;
+#else
+                tparams.tile_ofm = 2;
+                tparams.tile_ifm = 1;
+                tparams.tile_k = 4;
+#endif
+        } else if ((params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696)) {
+#if 1
+                tparams.tile_ofm = 1;
+                tparams.tile_ifm = 8;
+                tparams.tile_k = 8;
+#else
+                tparams.tile_ofm = 2;
+                tparams.tile_ifm = 1;
+                tparams.tile_k = 4;
+#endif
+        } else if ((params.outputs[0].Feature().v == 32 && params.inputs[0].Feature().v == 16)) {
+#if 1
+                tparams.tile_ofm = 1;
+                tparams.tile_ifm = 1;
+                tparams.tile_k = 8;
+#else
+                tparams.tile_ofm = 2;
+                tparams.tile_ifm = 1;
+                tparams.tile_k = 4;
+#endif
+        }
+    }
 
     size_t feature_threads = CeilDiv(params.outputs[0].Feature().v, tparams.tile_ofm * simd);
     size_t batch_threads = params.outputs[0].Batch().v;
@@ -340,7 +396,7 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
     const size_t lws_batches = 8;
     const size_t aligned_batch = Align(batch_threads, lws_batches); // Each WG calculates 8x8 batches (TILE_B x LWS[2] size)
     const bool can_use_slm = tparams.kernel_type == KernelType::SLM;
-
+    // GPU_DEBUG_INFO << "feature_threads: " << feature_threads << std::endl;
     dispatchData.gws[0] = can_use_slm ? feature_threads * simd
                                       : feature_threads * batch_threads * simd;
     dispatchData.gws[1] = 1;
@@ -357,6 +413,13 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
     dispatchData.tile_ms = tparams.dispatch_bsv;
     dispatchData.tile_ns = tparams.dispatch_fsv;
     dispatchData.use_slm = can_use_slm;
+
+    GPU_DEBUG_INFO << "gws [" << dispatchData.gws[0] << ", " << dispatchData.gws[1] << ", " << dispatchData.gws[2] << "]" << std::endl;
+    GPU_DEBUG_INFO << "lws [" << dispatchData.lws[0] << ", " << dispatchData.lws[1] << ", " << dispatchData.lws[2] << "]" << std::endl;
+    GPU_DEBUG_INFO << tparams.tile_b << " " << tparams.tile_ofm << " " << tparams.tile_ifm << " " << tparams.tile_k << " "
+                        << tparams.dispatch_bsv << " " << tparams.dispatch_fsv << " " <<  can_use_slm << std::endl;
+
+    GPU_DEBUG_INFO << "SetDefault END" << std::endl;
 
     return dispatchData;
 }
@@ -378,6 +441,7 @@ KernelsPriority FullyConnected_bf_tiled::GetKernelsPriority(const Params& params
 }
 
 JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_params& params, const DispatchData& dispatchData) const {
+    GPU_DEBUG_INFO << "GetJitConstants START" << std::endl;
     JitConstants jit = Parent::GetJitConstants(params, dispatchData);
     size_t tile_k_ofm = dispatchData.tile_nk * dispatchData.tile_n;
     size_t tile_k_ofm_packed = tile_k_ofm;
@@ -388,6 +452,7 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
 
         jit.Merge(make_int4_packed_type_jit_constant("INT4_PACKED_TYPE", weights_dt, tile_k_ofm));
         const size_t scale_group_size = params.weights.IFM().v / params.decompression_scale.Feature().v;
+        GPU_DEBUG_INFO << "scale_group_size: " << scale_group_size << std::endl;
         // Do not use SCALE_POST_OP for SLM kernel, since it demonstrates worse performance
         if (scale_group_size % simd == 0 && !dispatchData.use_slm)
             jit.AddConstant(MakeJitConstant("DECOMPRESSION_SCALE_POST_OP", 1));
@@ -455,6 +520,7 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
         jit.AddConstant(MakeJitConstant("TILE_OUT_B_PITCH", params.outputs[0].Feature().pitch));
         jit.AddConstant(MakeJitConstant("OUTPUT_3D", true));
         jit.AddConstant(MakeJitConstant("BATCH_SIZE", "(OUTPUT_BATCH_NUM * OUTPUT_FEATURE_NUM)"));
+        GPU_DEBUG_INFO << "OUTPUT_3D" << std::endl;
     } else {
         jit.AddConstant(MakeJitConstant("TILE_OUT_F_NUM", params.outputs[0].Feature().v));
         jit.AddConstant(MakeJitConstant("TILE_OUT_F_PITCH", params.outputs[0].Feature().pitch));
@@ -485,7 +551,11 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
                                            1 };
         jit.Merge(MakeFusedOpsJitConstants(params, { conf_scalar, conf_vec }));
     }
-
+    GPU_DEBUG_INFO << "JIT Summary >>>>>" << std::endl;
+    for (const auto& item : jit.GetDefinitions()) {
+        GPU_DEBUG_INFO << item.first << " : " << item.second << std::endl;
+    }
+    GPU_DEBUG_INFO << "GetJitConstants END" << std::endl;
     return jit;
 }
 
@@ -526,6 +596,7 @@ void FullyConnected_bf_tiled::GetUpdateDispatchDataFunc(KernelData& kd) const {
 KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &params,
                                                                 const optional_params &options,
                                                                 const int autoTuneIndex) const {
+    GPU_DEBUG_INFO << "GetTunedKernelsDataByIndex START" << std::endl;
     auto& fc_params = static_cast<const fully_connected_params&>(params);
 
     if (autoTuneIndex >= 0 && autoTuneIndex < static_cast<int>(auto_tune_params.size())
@@ -535,7 +606,10 @@ KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &pa
     tune_params tparams = GetAutoTuneParams(fc_params, KernelType::ANY, autoTuneIndex);
 
     WeightsLayout weights_layout = WeightsLayout::os_iyx_osv16;
-    if (tparams.tile_ofm * simd == 32)
+    // WeightsLayout weights_layout = WeightsLayout::oiyx;
+    if (tparams.tile_ofm == 1 && tparams.tile_ifm == 1 && tparams.tile_k == 8)
+        weights_layout = WeightsLayout::oiyx; // my test
+    else if (tparams.tile_ofm * simd == 32)
         weights_layout = WeightsLayout::os_iyx_osv32;
     else if (tparams.tile_ofm * simd == 64)
         weights_layout = WeightsLayout::os_iyx_osv64;
@@ -571,7 +645,7 @@ KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &pa
         // Update default update_dispatch_data_func function
         GetUpdateDispatchDataFunc(kernels_data[0]);
     }
-
+    GPU_DEBUG_INFO << "GetTunedKernelsDataByIndex END" << std::endl;
     return kernels_data;
 }
 
@@ -589,15 +663,16 @@ KernelsData FullyConnected_bf_tiled::GetKernelsDataForAutoTune(const Params& par
 }
 
 KernelsData FullyConnected_bf_tiled::GetKernelsData(const Params& params, const optional_params& optParams) const {
+    GPU_DEBUG_INFO << "GetKernelsData START --------------------" << std::endl;
     KernelsData res = {};
-    auto& fc_params = static_cast<const fully_connected_params&>(params);
-    auto tparams = GetAutoTuneParams(fc_params);
+    // auto& fc_params = static_cast<const fully_connected_params&>(params);
+    // auto tparams = GetAutoTuneParams(fc_params);
 
     KernelsData kds = GetTunedKernelsDataByIndex(params, optParams, -1);
     if (!kds.empty()) {
         res.emplace_back(kds[0]);
     }
-
+    GPU_DEBUG_INFO << "GetKernelsData END" << std::endl;
     return res;
 }
 

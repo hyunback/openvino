@@ -89,6 +89,7 @@ KernelsData FullyConnectedKernelBase::GetCommonKernelsData(const Params &params,
                                                            const std::string exeMode,
                                                            int autoTuneIndex,
                                                            int kernel_number) const {
+    GPU_DEBUG_INFO << "GetCommonKernelsData start" << std::endl;
     if (!Validate(params, options)) {
         return KernelsData();
     }
@@ -152,6 +153,7 @@ KernelsData FullyConnectedKernelBase::GetCommonKernelsData(const Params &params,
 
     // TODO Pass estimated time only through DispatchData
     kd.autoTuneIndex = autoTuneIndex;
+    GPU_DEBUG_INFO << "GetCommonKernelsData end" << std::endl;
     return {kd};
 }
 

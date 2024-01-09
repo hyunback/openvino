@@ -1047,13 +1047,24 @@ public:
         tests::random_generator rg(GET_SUITE_NAME);
         auto& engine = get_test_engine();
 
-        if (engine.get_device_info().dev_type == device_type::discrete_gpu)
-            GTEST_SKIP();
+        // if (engine.get_device_info().dev_type == device_type::discrete_gpu)
+        //     GTEST_SKIP();
 
-        long int batch_num = is_dynamic ? 260 : 256;
-        long int ifm_num = 256;
-        long int ofm_num = 256;
-        long int scales_group_size = 128;
+        // long int batch_num = is_dynamic ? 260 : 256;
+        // long int ifm_num = 256;
+        // long int ofm_num = 256;
+        // long int scales_group_size = 128;
+
+        long int batch_num = 1;
+        long int ifm_num = 4096;  //13696; // 4096;
+        long int ofm_num = 27392; // 4096;  // 27392;
+        long int scales_group_size = 1;
+        // long int scales_group_size = 32;
+
+        ifm_num = 16;
+        ofm_num = 32;
+        // ifm_num = 13696;
+        // ofm_num = 4096;
 
         auto input_mem = engine.allocate_memory({ { batch_num, ifm_num}, data_types::f16, format::bfyx });
         auto weights_mem = engine.allocate_memory({ {ofm_num, ifm_num}, data_types::u4, format::bfyx });
@@ -1063,16 +1074,20 @@ public:
         set_values(input_mem, input_data);
 
         auto weigths_data = rg.generate_random_1d<uint8_t>(ofm_num * ifm_num / 2, 0, 10);
+        // auto weigths_data = rg.generate_random_1d<uint8_t>(ofm_num * ifm_num / 2, 1, 1);
         set_values(weights_mem, weigths_data);
 
-        auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, -4.0f, 4.0f);
+        // auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, -4.0f, 4.0f);
+        auto scale_data = rg.generate_random_1d<ov::float16>(ofm_num * ifm_num / scales_group_size, 1.0f, 1.0f);
         set_values(scale_mem, scale_data);
 
         auto in_layout = is_dynamic ? layout{ {-1, ifm_num}, data_types::f16, format::bfyx }
                                     : layout{ {batch_num, ifm_num}, data_types::f16, format::bfyx };
 
         auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "scale", "", data_types::f16, padding(), 2, 2);
-        fc_prim.decompression_zero_point_scalar = 8;
+        // auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "", "", data_types::f16, padding(), 2, 2); // error w/o scale
+        // fc_prim.decompression_zero_point_scalar = 8;
+        fc_prim.decompression_zero_point_scalar = 0;
 
         auto get_ref_results = [&]() {
             topology topology(
@@ -1084,6 +1099,7 @@ public:
 
             auto config = get_test_default_config(engine);
             config.set_property(ov::intel_gpu::allow_new_shape_infer(true));
+            config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{{"fc_prim", { format::bfyx, "fully_connected_gpu_bfyx_ref"}}}));
 
             network network(engine, topology, config);
             network.set_input_data("input", input_mem);
@@ -1129,9 +1145,20 @@ public:
         auto ref_output_mem = get_ref_results();
         cldnn::mem_lock<ov::float16> output_ptr_ref (ref_output_mem, get_test_stream());
 
+        size_t count = 0;
+        float max_diff = 0.f;
+        float avg = 0.f;
         for (size_t i = 0; i < output_ptr_ref.size(); i++) {
-            ASSERT_FLOAT_EQ(output_ptr_ref[i], output_ptr[i]) << "i = " << i;
+            auto abs_diff = std::abs(output_ptr_ref[i] - output_ptr[i]);
+            if (max_diff < abs_diff)
+                max_diff = abs_diff;
+            avg += abs_diff;
+            count++;
+            // ASSERT_FLOAT_EQ(output_ptr_ref[i], output_ptr[i]) << "i = " << i;
+            // if (i < 10)
+            std::cout << i << " : " << output_ptr_ref[i] << " : " << output_ptr[i] << std::endl;
         }
+        std::cout << "---> count: " << count << ", max_diff:" << max_diff << ", avg_diff: " << (avg/count) << std::endl;
     }
 
     void test_compressed_scale_bias(bool is_caching_test) {

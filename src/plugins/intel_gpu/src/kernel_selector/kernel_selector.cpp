@@ -66,7 +66,12 @@ kernel_selector_base::kernel_selector_base() {
 }
 
 KernelData kernel_selector_base::get_best_kernel(const Params& params, const optional_params& options) const {
+    if (params.layerID == "weights_weights_reorder_0_reorder_weigths")
+        GPU_DEBUG_COUT << "!!!!!!!!" << std::endl;
     auto kernels = GetBestKernels(params, options);
+    if (kernels.empty()) {
+        GPU_DEBUG_COUT << params.layerID << "!!!!!!!!" << std::endl;
+    }
     OPENVINO_ASSERT(!kernels.empty(), "[GPU] Couldn't find a suitable kernel for ", params.layerID, " params raw string: ", params.to_cache_string_v2());
     return kernels[0];
 }
