@@ -400,7 +400,14 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
     // GPU_DEBUG_INFO << "feature_threads: " << feature_threads << std::endl;
     dispatchData.gws[0] = can_use_slm ? feature_threads * simd
                                       : feature_threads * batch_threads * simd;
-    if (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) {
+    // if (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096) {
+    //     dispatchData.gws[0] /= 4;   // outer_loop
+    // }
+    if (true &&
+        ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+         (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) &&
+        !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+        GPU_DEBUG_INFO << "Apply outer_loop /=4 !!!!!!!!!!!!!!!!!" << std::endl;
         dispatchData.gws[0] /= 4;   // outer_loop
     }
 
@@ -463,6 +470,14 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
         // Do not use SCALE_POST_OP for SLM kernel, since it demonstrates worse performance
         if (scale_group_size % simd == 0 && !dispatchData.use_slm)
             jit.AddConstant(MakeJitConstant("DECOMPRESSION_SCALE_POST_OP", 1));
+    }
+    if (true &&
+        ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+         (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) &&
+        !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+        jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP", 1));
+    } else {
+        jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP", 0));
     }
 
     if (dispatchData.use_slm) {

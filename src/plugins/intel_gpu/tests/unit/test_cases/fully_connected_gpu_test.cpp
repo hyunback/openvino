@@ -1058,17 +1058,20 @@ public:
         long int batch_num = 1;
         long int ifm_num = 256;
         long int ofm_num = 256;
-        // long int scales_group_size = 1;
-        long int scales_group_size = 32;
+        long int scales_group_size = 1;
+        // long int scales_group_size = 32;
 
-        // ifm_num = 16;
-        // ofm_num = 128;  // FT:4
+        ifm_num = 16;
+        ofm_num = 128;  // FT:4
         // ifm_num = 13696;
         // ofm_num = 4096;
         ifm_num = 4096;
         ofm_num = 27392;
+        bool is_3d = true;
 
-        auto input_mem = engine.allocate_memory({ { batch_num, ifm_num}, data_types::f16, format::bfyx });
+        auto input_ps = is_3d ?  ov::PartialShape{ 1, batch_num, ifm_num } : ov::PartialShape{ batch_num, ifm_num};
+        auto input_mem = engine.allocate_memory({ input_ps, data_types::f16, format::bfyx });
+
         auto weights_mem = engine.allocate_memory({ {ofm_num, ifm_num}, data_types::u4, format::bfyx });
         auto scale_mem = engine.allocate_memory({ {ofm_num, ifm_num / scales_group_size}, data_types::f16, format::bfyx });
 
@@ -1084,9 +1087,17 @@ public:
         set_values(scale_mem, scale_data);
 
         auto in_layout = is_dynamic ? layout{ {-1, ifm_num}, data_types::f16, format::bfyx }
-                                    : layout{ {batch_num, ifm_num}, data_types::f16, format::bfyx };
+                                    : layout{ input_ps, data_types::f16, format::bfyx };
 
-        auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "scale", "", data_types::f16, padding(), 2, 2);
+// #if TEST_3D
+//         auto in_layout = is_dynamic ? layout{ {-1, ifm_num}, data_types::f16, format::bfyx }
+//                                     : layout{ ov::PartialShape{ 1, batch_num, ifm_num }, data_types::f16, format::bfyx };
+// #else
+//         auto in_layout = is_dynamic ? layout{ {-1, ifm_num}, data_types::f16, format::bfyx }
+//                                     : layout{ {batch_num, ifm_num}, data_types::f16, format::bfyx };
+// #endif
+
+        auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "scale", "", data_types::f16, padding(), is_3d ? 3 : 2, 2);
         // auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "", "", data_types::f16, padding(), 2, 2); // error w/o scale
         // fc_prim.decompression_zero_point_scalar = 8;
         fc_prim.decompression_zero_point_scalar = 0;
