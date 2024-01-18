@@ -134,11 +134,13 @@
     #define _sub_group_block_read_us2(ptr) intel_sub_group_block_read_us2(ptr)
     #define _sub_group_block_read_us4(ptr) intel_sub_group_block_read_us4(ptr)
     #define _sub_group_block_read_us8(ptr) intel_sub_group_block_read_us8(ptr)
+    #define _sub_group_block_read_us16(ptr) intel_sub_group_block_read_us16(ptr)
 #elif (__OPENCL_C_VERSION__ >= 200)
     DECLARE_BLOCK_READ_EMULATION(2, 1)
     DECLARE_BLOCK_READ_EMULATION(2, 2)
     DECLARE_BLOCK_READ_EMULATION(2, 4)
     DECLARE_BLOCK_READ_EMULATION(2, 8)
+    DECLARE_BLOCK_READ_EMULATION(2, 16)
 #endif
 
 #if defined(cl_intel_subgroups_char)

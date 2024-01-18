@@ -116,11 +116,13 @@
     #define _sub_group_block_write_us2(ptr, v) intel_sub_group_block_write_us2(ptr, v)
     #define _sub_group_block_write_us4(ptr, v) intel_sub_group_block_write_us4(ptr, v)
     #define _sub_group_block_write_us8(ptr, v) intel_sub_group_block_write_us8(ptr, v)
+    #define _sub_group_block_write_us16(ptr, v) intel_sub_group_block_write_us16(ptr, v)
 #elif (__OPENCL_C_VERSION__ >= 200)
     DECLARE_BLOCK_WRITE_EMULATION(2, 1)
     DECLARE_BLOCK_WRITE_EMULATION(2, 2)
     DECLARE_BLOCK_WRITE_EMULATION(2, 4)
     DECLARE_BLOCK_WRITE_EMULATION(2, 8)
+    DECLARE_BLOCK_WRITE_EMULATION(2, 16)
 #endif
 
 #if defined(cl_intel_subgroups_char)

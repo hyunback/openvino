@@ -9,6 +9,7 @@
 #include "common_types.h"
 
 #define ENABLE_OUTER_LOOP
+// #define ENABLE_OUTER_LOOP1
 
 static constexpr size_t simd = 16;
 
@@ -245,6 +246,10 @@ FullyConnected_bf_tiled::GetAutoTuneParams(const fully_connected_params& params,
 
     if (params.weights.GetDType() == WeightsType::UINT4 || params.weights.GetDType() == WeightsType::INT4) {
         if (!params.is_shape_agnostic && batch == 1) {
+            // if ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+            //     (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) {
+            //         return selector.Default(tune_params(1, 4, 1, 2, 1, 1, EXE_MODE_DEFAULT));
+            // }
             return selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
         } else {
             // Try to use SLM kernels if possible
@@ -335,20 +340,31 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
         if ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
             (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) {
                 // selector.Default(tune_params(1, 2, 1, 4, 1, 1, EXE_MODE_DEFAULT));
+#if 1
+                tparams.tile_ofm = 2;
+                tparams.tile_ifm = 8;
+                tparams.tile_k = 8;
+#else
+                // tparams.tile_ofm = 2;
+                // tparams.tile_ifm = 1;
+                // tparams.tile_k = 4;
+#endif
+        } else if ((params.outputs[0].Y().v == 65024 && params.inputs[0].Y().v == 4096) ||
+                   (params.outputs[0].Feature().v == 65024 && params.inputs[0].Feature().v == 4096)) {
 #if 0
                 tparams.tile_ofm = 8;
-                tparams.tile_ifm = 8;
+                tparams.tile_ifm = 1;
                 tparams.tile_k = 1;
 #else
-                tparams.tile_ofm = 2;
-                tparams.tile_ifm = 1;
-                tparams.tile_k = 4;
+                // tparams.tile_ofm = 2;
+                // tparams.tile_ifm = 1;
+                // tparams.tile_k = 2;
 #endif
         } else if ((params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696)) {
 #if 1
                 tparams.tile_ofm = 2;
                 tparams.tile_ifm = 8;
-                tparams.tile_k = 4;
+                tparams.tile_k = 8; //4;
 #else
                 tparams.tile_ofm = 2;
                 tparams.tile_ifm = 1;
@@ -381,6 +397,15 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
         dispatchData.gws[0] /= 4;
     }
 #endif
+#ifdef ENABLE_OUTER_LOOP1
+    if (((params.outputs[0].Y().v == 65024 && params.inputs[0].Y().v == 4096) ||
+         (params.outputs[0].Feature().v == 65024 && params.inputs[0].Feature().v == 4096)) &&
+        !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+        GPU_DEBUG_INFO << "Apply outer_loop /=8 !!!!!!!!!!!!!!!!!" << std::endl;
+        dispatchData.gws[0] /= 8;
+    }
+#endif
+
     dispatchData.gws[1] = 1;
     dispatchData.gws[2] = can_use_slm ? aligned_batch : 1;
 
@@ -395,6 +420,11 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
     dispatchData.tile_ms = tparams.dispatch_bsv;
     dispatchData.tile_ns = tparams.dispatch_fsv;
     dispatchData.use_slm = can_use_slm;
+
+    GPU_DEBUG_INFO << "gws [" << dispatchData.gws[0] << ", " << dispatchData.gws[1] << ", " << dispatchData.gws[2] << "]" << std::endl;
+    // GPU_DEBUG_INFO << "lws [" << dispatchData.lws[0] << ", " << dispatchData.lws[1] << ", " << dispatchData.lws[2] << "]" << std::endl;
+    // GPU_DEBUG_INFO << tparams.tile_b << " " << tparams.tile_ofm << " " << tparams.tile_ifm << " " << tparams.tile_k << " "
+    //                     << tparams.dispatch_bsv << " " << tparams.dispatch_fsv << " " <<  can_use_slm << std::endl;
 
     return dispatchData;
 }
@@ -427,20 +457,41 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
         jit.Merge(make_int4_packed_type_jit_constant("INT4_PACKED_TYPE", weights_dt, tile_k_ofm));
         const size_t scale_group_size = params.weights.IFM().v / params.decompression_scale.Feature().v;
         // Do not use SCALE_POST_OP for SLM kernel, since it demonstrates worse performance
-        bool is_target = (params.outputs[0].Batch().v == 1 && !params.is_shape_agnostic &&
-                            (params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696));
+        bool is_target = params.outputs[0].Batch().v == 1 && !params.is_shape_agnostic &&
+                            params.outputs[0].Feature().v == 4096 && params.inputs[0].Feature().v == 13696;
+
+        bool is_target1 = (params.outputs[0].Batch().v == 1 && !params.is_shape_agnostic) &&
+                            ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+                             (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096));
         if (is_target)
-            jit.AddConstant(MakeJitConstant("MY_IFM_TEST", 1));
+            jit.AddConstant(MakeJitConstant("MY_IFM_TEST1", 1));
+            jit.AddConstant(MakeJitConstant("MY_K_TILE_TEST", 1));
+        if (is_target1) {
+            jit.AddConstant(MakeJitConstant("MY_IFM_TEST1", 1));
+            jit.AddConstant(MakeJitConstant("MY_K_TILE_TEST", 1));
+        }
         // is_target = false;
-        if (scale_group_size % simd == 0 && !dispatchData.use_slm && !is_target)
+        // is_target1 = false;
+        if (scale_group_size % simd == 0 && !dispatchData.use_slm && !is_target && !is_target1)
             jit.AddConstant(MakeJitConstant("DECOMPRESSION_SCALE_POST_OP", 1));
 #ifdef ENABLE_OUTER_LOOP
-        if ( ((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
-            (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) &&
-            !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+        if (((params.outputs[0].Y().v == 27392 && params.inputs[0].Y().v == 4096) ||
+             (params.outputs[0].Feature().v == 27392 && params.inputs[0].Feature().v == 4096)) &&
+             !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+            GPU_DEBUG_INFO << "set MY_OUTER_LOOP 1" << std::endl;
             jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP", 1));
         } else {
+            GPU_DEBUG_INFO << "set MY_OUTER_LOOP 0" << std::endl;
             jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP", 0));
+        }
+#endif
+#ifdef ENABLE_OUTER_LOOP1
+        if (((params.outputs[0].Y().v == 65024 && params.inputs[0].Y().v == 4096) ||
+             (params.outputs[0].Feature().v == 65024 && params.inputs[0].Feature().v == 4096)) &&
+             !params.is_shape_agnostic && params.outputs[0].Batch().v == 1) {
+            jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP1", 1));
+        } else {
+            jit.AddConstant(MakeJitConstant("MY_OUTER_LOOP1", 0));
         }
 #endif
     }
@@ -538,6 +589,10 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
         jit.Merge(MakeFusedOpsJitConstants(params, { conf_scalar, conf_vec }));
     }
 
+    GPU_DEBUG_INFO << "JIT Summary >>>>>" << std::endl;
+    for (const auto& item : jit.GetDefinitions()) {
+        GPU_DEBUG_INFO << item.first << " : " << item.second << std::endl;
+    }
     return jit;
 }
 
@@ -585,11 +640,14 @@ KernelsData FullyConnected_bf_tiled::GetTunedKernelsDataByIndex(const Params &pa
         return {};
 
     tune_params tparams = GetAutoTuneParams(fc_params, KernelType::ANY, autoTuneIndex);
+    // bool mytest = (fc_params.outputs[0].Batch().v == 1 && !fc_params.is_shape_agnostic &&
+    //                 ((fc_params.outputs[0].Y().v == 27392 && fc_params.inputs[0].Y().v == 4096) ||
+    //                 (fc_params.outputs[0].Feature().v == 27392 && fc_params.inputs[0].Feature().v == 4096)));
 
     WeightsLayout weights_layout = WeightsLayout::os_iyx_osv16;
     if (tparams.tile_ofm * simd == 32)
         weights_layout = WeightsLayout::os_iyx_osv32;
-    else if (tparams.tile_ofm * simd == 64)
+    else if (tparams.tile_ofm * simd == 64 /* && mytest*/)
         weights_layout = WeightsLayout::os_iyx_osv64;
 
     auto kernels_data = GetCommonKernelsData(params,
