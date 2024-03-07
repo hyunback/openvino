@@ -276,7 +276,12 @@ KERNEL(gemm_tiled_opt)(
         #endif // INDIRECT_INPUT1
             {
         #if TILE_N_NOT_DIVISIBLE
+        // #if M==4096 && N==40
+                // b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
+                // b_tile[b_load_id] = b_raw_global_id > N - 1 ? 0 : b_tile[b_load_id];
+        // #else
                 b_tile[b_load_id] = b_raw_global_id > N - 1 ? 0 : b_ptr[sglid];
+        // #endif
         #else
                 b_tile[b_load_id] = BLOCK_READ_B(b_ptr, 0);
         #endif

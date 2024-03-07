@@ -2,9 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+#include <cstdlib>
 #include "gemm_kernel_tiled_opt.h"
 #include "kernel_selector_utils.h"
 #include <iostream>
+
+int get_env(std::string key, int &val);
+int get_env(std::string key, int &val) {
+        if (const auto env_var = std::getenv(key.c_str())) {
+            val = std::atoi(env_var);
+            return true;
+        }
+        return false;
+}
 
 namespace kernel_selector {
 ParamsKey GemmKernelTiledOpt::GetSupportedKey() const {
@@ -60,6 +70,10 @@ GemmKernelBase::DispatchData GemmKernelTiledOpt::SetDefault(const gemm_params& p
         dispatchData.lws[0] = td.simd_size;
         dispatchData.lws[1] = 1;
         dispatchData.lws[2] = 1;
+
+        GPU_DEBUG_INFO << "[" << global[0] << ", " << global[1] << ", " << global[2] << "], " << std::endl;
+        GPU_DEBUG_INFO << "[" << dispatchData.gws[0] << ", " << dispatchData.gws[1] << ", " << dispatchData.gws[2] << "], "
+                        <<"[" << dispatchData.lws[0] << ", " << dispatchData.lws[1] << ", " << dispatchData.lws[2] << "], " << std::endl;
     }
     return dispatchData;
 }
@@ -74,7 +88,7 @@ GemmKernelTiledOpt::GemmTuningData GemmKernelTiledOpt::SetTuningParams(const gem
         auto n_size = output.X().v;
         auto k_size = params.transpose_input0 ? params.inputs[0].Y().v : params.inputs[0].X().v;
 
-        GPU_DEBUG_COUT << "[" << m_size << ", " << n_size << ", " << k_size << "], "
+        GPU_DEBUG_INFO << "[" << m_size << ", " << n_size << ", " << k_size << "], "
             << params.transpose_input0 << ", " << params.transpose_input1 << std::endl;
 
         auto total_batches = output.LogicalSize() / (output.X().v * output.Y().v);
@@ -97,6 +111,38 @@ GemmKernelTiledOpt::GemmTuningData GemmKernelTiledOpt::SetTuningParams(const gem
             tuning_data.tile_k_size = tuning_data.simd_size;
             tuning_data.tile_m_size = tuning_data.simd_size;
         }
+        // if (m_size == 4096 && tuning_data.simd_size == 16)
+        //     tuning_data.tile_m_size = 32;
+        // if (k_size == 4096 && tuning_data.simd_size == 16)
+        //     tuning_data.tile_k_size = 32;
+        // if (n_size == 4096 && tuning_data.simd_size == 16)
+        //     tuning_data.tile_n_size = 32;
+        // if (m_size == 4096 && n_size == 40 && k_size == 4096 && tuning_data.simd_size == 16) {
+        //     tuning_data.tile_n_size = 8;
+        //     tuning_data.simd_size = 8;
+        // }
+
+        int val;
+        if (get_env("MY_SIMD", val))
+            tuning_data.simd_size = val;
+        if (get_env("MY_TILE_N", val))
+            tuning_data.tile_n_size = val;
+        if (get_env("MY_TILE_M", val))
+            tuning_data.tile_m_size = val;
+        if (get_env("MY_TILE_K", val))
+            tuning_data.tile_k_size = val;
+        // if (k_size == 4096 || m_size == 4096) {
+        //     printf("%d %d %d %d %d\n",
+        //         leftovers,
+        //         total_batches > 1,
+        //         params.transpose_input0,
+        //         params.transpose_input1,
+        //         !IsSIMDSizeSupported(params.engineInfo, 8));
+        // }
+            GPU_DEBUG_INFO << "tile_m_size " << tuning_data.tile_m_size
+                            << ", tile_n_size " << tuning_data.tile_n_size
+                            << ", tile_k_size " << tuning_data.tile_k_size
+                            << ", simd_size" << tuning_data.simd_size << std::endl;
     } else {
         // In shape agnostic kernel case, the vector size of FusedOpsConfiguration cannot be specified at build time,
         // so the tile sizes must be the same as simd_size

@@ -1777,6 +1777,18 @@ memory::ptr primitive_inst::allocate_output(engine& _engine,
     };
 
     layout = cldnn::layout(layout.get_partial_shape().get_max_shape(), layout.data_type, layout.format, layout.data_padding);
+    // if (_node.is_type<gemm>()) {
+    //     auto my_shape = layout.get_partial_shape().get_max_shape();
+    //     for (size_t i = 0; i < my_shape.size(); ++i) {
+    //         auto before = my_shape[i];
+    //         if (before == 40) {
+    //             my_shape[i] = align_to(my_shape[i], 16);
+    //         }
+    //         auto after = my_shape[i];
+    //         GPU_DEBUG_INFO << i << ": " << before << " -> " << after << std::endl;
+    //     }
+    //     layout = cldnn::layout(my_shape, layout.data_type, layout.format, layout.data_padding);
+    // }
     bool usm_device_allocatable = true;
     const auto& total_device_input_mem_size = std::accumulate(impl_params.input_layouts.begin(), impl_params.input_layouts.end(), (uint64_t)0, device_mem_acc);
     if (total_device_input_mem_size > _engine.get_device_info().max_global_mem_size)
