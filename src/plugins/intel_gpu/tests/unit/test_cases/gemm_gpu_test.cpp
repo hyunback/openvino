@@ -2686,4 +2686,300 @@ TEST_F(gemm_gpu_tests, transpose_matmul_dynamic_4d_cached) {
 TEST_F(gemm_gpu_tests, transpose_matmul_transpose_dynamic_4d_cached) {
     this->test_transpose_matmul_transpose(4, true, true);
 }
+
+int get_env(std::string key, int &val);
+int get_env(std::string key, int &val) {
+        if (const auto env_var = std::getenv(key.c_str())) {
+            val = std::atoi(env_var);
+            return true;
+        }
+        return false;
+}
+template <typename gemm_params, typename input0_type, typename input1_type, typename input2_type, typename output_type, typename accumulator_type>
+class GemmBaseTest2 : public ::testing::TestWithParam<gemm_params> {
+public:
+    virtual ov::intel_gpu::ImplementationDesc getImplementationDesc(gemm_params& p) {
+         return { format::bfyx, p.kernel_name };
+    }
+
+    tests::random_generator rg;
+
+    void SetUp() override {
+        rg.set_seed(GET_SUITE_NAME);
+    }
+
+    inline size_t getGemmIndex(size_t x, size_t y, size_t f, size_t b, size_t x_size, size_t y_size, size_t f_num, size_t b_num,
+                               size_t x_pitch, size_t y_pitch, size_t f_pitch, size_t b_pitch) {
+        return (x % x_size) * x_pitch + (y % y_size) * y_pitch + (f % f_num) * f_pitch + (b % b_num) * b_pitch;
+    }
+
+    void execute(gemm_params& p, bool check_accuracy = false, bool use_env = false) {
+        if (use_env) {
+            int val;
+            if (get_env("M_SIZE", val))
+                p.m_size = val;
+            if (get_env("K_SIZE", val))
+                p.k_size = val;
+            if (get_env("N_SIZE", val))
+                p.n_size = val;
+        }
+
+        auto y0_size = p.m_size;
+        auto y0_pitch = p.k_size;
+        auto x0_size = p.k_size;
+        auto x0_pitch = 1;
+        auto f0_pitch = y0_size * x0_size;
+        auto b0_pitch = p.f0_num * f0_pitch;
+
+        auto y1_size = p.k_size;
+        auto y1_pitch = p.n_size;
+        auto x1_size = p.n_size;
+        auto x1_pitch = 1;
+        auto f1_pitch = y1_size * x1_size;
+        auto b1_pitch = p.f1_num * f1_pitch;
+
+        auto y2_size = p.m_size;
+        auto y2_pitch = p.n_size;
+        auto x2_size = p.n_size;
+        auto x2_pitch = 1;
+        auto f2_pitch = y2_size * x2_size;
+        auto b2_pitch = p.f2_num * f2_pitch;
+
+        auto y_out_size = p.m_size;
+        auto y_out_pitch = p.n_size;
+        auto x_out_size = p.n_size;
+        auto x_out_pitch = 1;
+        auto f_out_pitch = y_out_size * x_out_size;
+        auto b_out_pitch = p.f_out_num * f_out_pitch;
+
+        if (p.transpose_input0) {
+            y0_size = p.k_size;
+            y0_pitch = p.m_size;
+            x0_size = p.m_size;
+            x0_pitch = 1;
+        }
+
+        if (p.transpose_input1) {
+            y1_size = p.n_size;
+            y1_pitch = p.k_size;
+            x1_size = p.k_size;
+            x1_pitch = 1;
+        }
+
+        auto& engine = get_test_engine();
+        auto input0_size = tensor((int)p.b0_num, (int)p.f0_num, (int)x0_size, (int)y0_size);
+        VVVVF<input0_type> input0_data = rg.generate_random_4d<input0_type>(p.b0_num, p.f0_num, x0_size, y0_size, p.range0[0], p.range0[1], p.range0[2]);
+        auto input0_data_bfyx = flatten_4d(format::bfyx, input0_data);
+        auto input0_mem = engine.allocate_memory({ p.allocate0_type, format::bfyx, input0_size });
+        set_values(input0_mem, input0_data_bfyx);
+        // auto input0_mem = engine.allocate_memory({ p.allocate0_type, format::bfyx, input0_size });
+        // std::vector<input0_type> test_input0(input0_size.sizes(), 1);
+        // set_values(input0_mem, test_input0);
+
+
+        auto input1_size = tensor((int)p.b1_num, (int)p.f1_num, (int)x1_size, (int)y1_size);
+        VVVVF<input1_type> input1_data = rg.generate_random_4d<input1_type>(p.b1_num, p.f1_num, x1_size, y1_size, p.range1[0], p.range1[1], p.range1[2]);
+        auto input1_data_bfyx = flatten_4d(format::bfyx, input1_data);
+        auto input1_mem = engine.allocate_memory({ p.allocate1_type, format::bfyx, input1_size });
+        set_values(input1_mem, input1_data_bfyx);
+        // auto input1_mem = engine.allocate_memory({ p.allocate1_type, format::bfyx, input1_size });
+        // std::vector<input1_type> test_input1(input1_size.sizes(), 2);
+        // set_values(input1_mem, test_input1);
+
+        auto input2_size = tensor((int)p.b2_num, (int)p.f2_num, (int)x2_size, (int)y2_size);
+        VVVVF<input2_type> input2_data = rg.generate_random_4d<input2_type>(p.b2_num, p.f2_num, x2_size, y2_size, p.range2[0], p.range2[1], p.range2[2]);
+        auto input2_data_bfyx = flatten_4d(format::bfyx, input2_data);
+        auto input2_mem = engine.allocate_memory({ p.allocate2_type, format::bfyx, input2_size });
+        set_values(input2_mem, input2_data_bfyx);
+        // auto input2_mem = engine.allocate_memory({ p.allocate2_type, format::bfyx, input2_size });
+        // std::vector<input2_type> test_input2(input1_size.sizes(), 3);
+        // set_values(input2_mem, test_input2);
+
+        std::cout << "test_gemm_size: M: " << p.m_size << ", K: " << p.k_size << ", N: " << p.n_size << std::endl;
+        topology topology;
+        topology.add(input_layout("input0", input0_mem->get_layout()));
+        topology.add(input_layout("input1", input1_mem->get_layout()));
+        if (p.beta != 0) {
+            topology.add(input_layout("input2", input2_mem->get_layout()));
+            topology.add(gemm("gemm_bfyx", { input_info("input0"), input_info("input1"), input_info("input2") }, p.output_type, p.transpose_input0, p.transpose_input1, p.alpha, p.beta));
+        } else {
+            topology.add(gemm("gemm_bfyx", { input_info("input0"), input_info("input1") }, p.output_type, p.transpose_input0, p.transpose_input1, p.alpha, p.beta));
+        }
+        topology.add(reorder("reorder_bfyx", input_info("gemm_bfyx"), format::bfyx, data_types::f32));
+
+        ov::intel_gpu::ImplementationDesc gemm_impl = getImplementationDesc(p);
+
+        ExecutionConfig cfg = get_test_default_config(engine);
+        cfg.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{ {"gemm_bfyx", gemm_impl} }));
+
+        cldnn::network::ptr network = get_network(engine, topology, cfg, get_test_stream_ptr(), false);
+        memory::ptr final_out;
+        const size_t loop_cnt = check_accuracy ? 1 : 500;
+        for (size_t i = 0; i < loop_cnt; ++i) {
+            network->set_input_data("input0", input0_mem);
+            network->set_input_data("input1", input1_mem);
+            if (p.beta != 0) {
+                network->set_input_data("input2", input2_mem);
+            }
+            auto outputs = network->execute();
+            auto output = outputs.at("reorder_bfyx").get_memory();
+            final_out = output;
+        }
+
+        cldnn::mem_lock<float> output_ptr(final_out, get_test_stream());
+
+        if (check_accuracy) {
+            std::vector<output_type> out_data(p.b_out_num * p.f_out_num * p.m_size * p.n_size);
+
+            for (size_t b = 0; b < p.b_out_num; ++b) {
+                for (size_t f = 0; f < p.f_out_num; ++f) {
+                    for (size_t y = 0; y < p.m_size; ++y) {
+                        for (size_t x = 0; x < p.n_size; ++x) {
+                            size_t input2_data_index = getGemmIndex(x, y, f, b, x2_size, y2_size, p.f2_num, p.b2_num, x2_pitch, y2_pitch, f2_pitch, b2_pitch);
+                            size_t out_data_index = getGemmIndex(x, y, f, b, x_out_size, y_out_size, p.f_out_num, p.b_out_num,
+                                                                x_out_pitch, y_out_pitch, f_out_pitch, b_out_pitch);
+                            accumulator_type acc = 0;
+
+                            for (size_t k = 0; k < p.k_size; ++k) {
+                                size_t input0_data_index = getGemmIndex(k * (!p.transpose_input0) + y * p.transpose_input0, y * (!p.transpose_input0) +
+                                k * p.transpose_input0, f, b, x0_size, y0_size, p.f0_num, p.b0_num, x0_pitch, y0_pitch, f0_pitch, b0_pitch);
+                                size_t input1_data_index = getGemmIndex(x * (!p.transpose_input1) + k * p.transpose_input1, k * (!p.transpose_input1) +
+                                x * p.transpose_input1, f, b, x1_size, y1_size, p.f1_num, p.b1_num, x1_pitch, y1_pitch, f1_pitch, b1_pitch);
+                                acc += (accumulator_type)input0_data_bfyx[input0_data_index] * (accumulator_type)input1_data_bfyx[input1_data_index];
+                            }
+
+                            out_data[out_data_index] = (output_type)acc;
+                            out_data[out_data_index] *= (output_type)p.alpha;
+                            if (p.beta)
+                                out_data[out_data_index] += (output_type)p.beta * (output_type)input2_data_bfyx[input2_data_index];
+                        }
+                    }
+                }
+            }
+
+            const float threshold_int8 = 1.f;
+            const float threshold_fp16 = 1e-1;
+            const float threshold_fp32 = 3e-4;
+
+            ASSERT_EQ(output_ptr.size(), (size_t)(p.b_out_num * p.f_out_num * p.m_size * p.n_size));
+            if (sizeof(input0_type) == 1) {
+                for (size_t i = 0; i < out_data.size(); ++i) {
+                    ASSERT_NEAR(float(output_ptr[i]), float(out_data[i]), threshold_int8) << "index = " << i;
+                }
+            } else if (sizeof(input0_type) == 2) {
+                for (size_t i = 0; i < out_data.size(); ++i) {
+                    ASSERT_NEAR(float(output_ptr[i]), float(out_data[i]), threshold_fp16) << "index = " << i;
+                }
+            } else {
+                for (size_t i = 0; i < out_data.size(); ++i) {
+                    ASSERT_NEAR(float(output_ptr[i]), float(out_data[i]), threshold_fp32) << "index = " << i;
+                }
+            }
+        }
+
+    }
+};
+
+// sd1.5 test  // M, N, K
+#define CASE_GEMM_FP16_TILED_NN_LCM0 4096, 4096, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM1 4096, 4096, 40, 4, 8, 4, 8, 1, 1, 4, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM2 4096, 48, 4096, 4, 8, 4, 8, 1, 1, 4, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM3 4096, 4096, 48, 4, 8, 4, 8, 1, 1, 4, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM4 4096, 48, 4096, 1, 8, 1, 8, 1, 1, 1, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM5 4096, 40, 4096, 4, 8, 4, 8, 1, 1, 4, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_LCM6 4096, 40, 4096, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+
+#define CASE_GEMM_FP16_TILED_NN_SD0 4096, 40, 4096, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD1 4096, 40, 4096, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD2 4096, 48, 4096, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+#define CASE_GEMM_FP16_TILED_NN_SD10 4096, 4096, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD11 4096, 4096, 40, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD12 4096, 4096, 48, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+// etc
+#define CASE_GEMM_FP16_TILED_NN_SD20 1024, 48, 1024, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD21 1024, 256, 1024, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD22 1024, 1024, 1024, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD23 2048, 2048, 2048, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD24 4096, 1024, 4096, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD25 1024, 40, 1024, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD26 1024, 48, 1024, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 4.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+#define CASE_GEMM_FP16_TILED_NN_SD30 4096, 128, 16, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD31 4096, 256, 16, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD32 4096, 128, 16, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD33 4096, 256, 16, 2, 8, 2, 8, 1, 1, 2, 8, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+#define CASE_GEMM_FP16_TILED_NN_SD40 4096, 77, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+#define CASE_GEMM_FP16_TILED_NN_SD41 4096, 78, 40, 1, 1, 1, 1, 1, 1, 1, 1, false, false, \
+1.0f, 0.0f, data_types::f16, data_types::f16, data_types::f16, data_types::f16, { -1, 1, 1 }, { -1, 1, 1 }, { -1, 1, 1 }
+
+class gemm_fp16_tiled_lcm_tests : public ::GemmBaseTest2<gemm_base_test_params, ov::float16, ov::float16, ov::float16, ov::float16, ov::float16> {};
+TEST_P(gemm_fp16_tiled_lcm_tests, basic) { auto p = GetParam(); execute(p); }
+
+INSTANTIATE_TEST_SUITE_P(gemm_gpu, gemm_fp16_tiled_lcm_tests, ::testing::ValuesIn(std::vector <gemm_base_test_params> {
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM0, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM1, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM2, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM3, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM4, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM5, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_LCM6, "gemm_tiled_opt" },
+}));
+
+
+class gemm_fp16_tiled_sd_tests : public ::GemmBaseTest2<gemm_base_test_params, ov::float16, ov::float16, ov::float16, ov::float16, ov::float16> {};
+TEST_P(gemm_fp16_tiled_sd_tests, basic) { auto p = GetParam(); execute(p); }
+TEST_P(gemm_fp16_tiled_sd_tests, basic1) { auto p = GetParam(); execute(p, true); }
+TEST_P(gemm_fp16_tiled_sd_tests, basic2) { auto p = GetParam(); execute(p, false, true); }
+INSTANTIATE_TEST_SUITE_P(gemm_gpu, gemm_fp16_tiled_sd_tests, ::testing::ValuesIn(std::vector <gemm_base_test_params> {
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD0, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD1, "gemm_tiled_opt" },     // target
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD2, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD10, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD11, "gemm_tiled_opt" },    // target
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD12, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD20, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD21, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD22, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD23, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD24, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD25, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD26, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD30, "gemm_tiled_opt" },    // 13 // no bias
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD31, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD32, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD33, "gemm_tiled_opt" },
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD40, "gemm_tiled_opt" },    // 17 // target layers start
+    gemm_base_test_params{ CASE_GEMM_FP16_TILED_NN_SD41, "gemm_tiled_opt" },
+
+}));
+
 } // namespace
