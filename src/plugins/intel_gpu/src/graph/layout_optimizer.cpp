@@ -49,6 +49,15 @@
 
 using namespace cldnn;
 
+int get_env(std::string key, int &val);
+int get_env(std::string key, int &val) {
+        if (const auto env_var = std::getenv(key.c_str())) {
+            val = std::atoi(env_var);
+            return true;
+        }
+        return false;
+}
+
 static size_t get_post_ops_count(const program_node& node) {
     size_t onednn_post_ops_count = 0;
     for (auto& fo : node.get_fused_primitives()) {
@@ -1174,6 +1183,26 @@ format layout_optimizer::get_expected_format(convolution_node const& node) {
     bool onednn_valid_post_ops = get_post_ops_count(node) <= 32;
     bool use_onednn_impls = _optimization_attributes.use_onednn_impls && input_layout.data_type != data_types::f32;
 
+
+    int my_depth = 3;
+    get_env("CONVD", my_depth);
+    int my_size = 16;
+    get_env("CONVS", my_size);
+    uint64_t my_size_uint64 = 160000;
+    if (my_size == 0) my_size_uint64 = 0;                   // all bfyx conv
+    else if (my_size == 16) my_size_uint64 = 160000;        // pr
+    else if (my_size == 32) my_size_uint64 = 320000;
+    else if (my_size == 65) my_size_uint64 = 650000;
+    else if (my_size == 98) my_size_uint64 = 980000;
+    else if (my_size == 131) my_size_uint64 = 1310000;
+    else if (my_size == 196) my_size_uint64 = 1960000;
+    else if (my_size == 393) my_size_uint64 = 3930000;
+    else if (my_size == 524) my_size_uint64 = 5240000;
+    else if (my_size == 786) my_size_uint64 = 7860000;
+    else if (my_size == 1000) my_size_uint64 = 10000000;    // work likes baseline.
+    GPU_DEBUG_INFO << "CONVD: " << my_depth << std::endl;
+    GPU_DEBUG_INFO << "CONVS: " << my_size_uint64 << std::endl;
+
     if (use_onednn_impls && onednn_valid_post_ops && node.get_preferred_output_fmt() != format::any) {
         expected_format = node.get_preferred_output_fmt();
     } else {
@@ -1214,7 +1243,8 @@ format layout_optimizer::get_expected_format(convolution_node const& node) {
                   convolution_fs_b_yx_fsv32_opt(input_layout,
                                                 output_layout,
                                                 weights_layout, prim, true)))) &&
-                 !(has_rank3_mvn_user(reinterpret_cast<program_node const&>(*node.get_users().front()), 0, 3, 160000) &&
+                 // !(has_rank3_mvn_user(reinterpret_cast<program_node const&>(*node.get_users().front()), 0, 3, 160000) &&
+                 !(has_rank3_mvn_user(reinterpret_cast<program_node const&>(*node.get_users().front()), 0, my_depth, my_size_uint64) &&
                      !static_cast<bool>(prepare_padding::get_convolution_needed_padding(const_cast<convolution_node&>(node))))) {
             // Chose fs_b_yx_fsv32 layout in two cases: 1-st: the current conv primitive totally supports fs_b_yx_fsv32 layout
             //                                          2-nd: the previous conv primitive supports fs_b_yx_fsv32 layout and
