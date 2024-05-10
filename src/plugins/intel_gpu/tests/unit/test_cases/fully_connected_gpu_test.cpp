@@ -2134,7 +2134,98 @@ public:
         ASSERT_EQ(-2.25f, output_ptr[2]);
         ASSERT_EQ(3.0f, output_ptr[3]);
     }
+
+    void test_my_fc_perf(long int batch = 2, long int feature = 30, long int ifm = 1024, long int ofm = 1024) {
+        tests::random_generator rg(GET_SUITE_NAME);
+        auto& engine = get_test_engine();
+
+        long int batch_num = batch;
+        long int feature_num = feature;
+        long int ifm_num = ifm;
+        long int ofm_num = ofm;
+        std::cout << ifm << " x " << ofm << std::endl;
+
+        auto input_mem = engine.allocate_memory({ { batch_num, feature_num, ifm_num, 1}, data_types::f16, format::bfyx });
+        auto weights_mem = engine.allocate_memory({ { ofm_num, ifm_num, 1, 1 }, data_types::f16, format::bfyx });
+
+        auto input_data = rg.generate_random_4d<ov::float16>(batch_num, feature_num, ifm_num, 1, -2.0f, 2.0f);
+        set_values(input_mem, input_data);
+
+        auto weigths_data = rg.generate_random_4d<ov::float16>(ofm_num, ifm_num, 1, 1, 0, 10);
+        set_values(weights_mem, weigths_data);
+
+        auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", data_types::f16, padding(), 3, 3);
+
+        topology topology(
+            input_layout("input", input_mem->get_layout()),
+            data("weights", weights_mem),
+            fc_prim
+        );
+
+        auto config = get_test_default_config(engine);
+        config.set_property(ov::intel_gpu::optimize_data(true));
+
+        network::ptr network = get_network(engine, topology, config, get_test_stream_ptr(), false);
+
+        for (size_t i = 0; i < 2000; ++i) {
+            network->set_input_data("input", input_mem);
+
+            auto outputs = network->execute();
+            auto output_mem = outputs.begin()->second.get_memory();
+        }
+    }
 };
+
+//  case A
+TEST_F(fully_connected_gpu_tests, mytest00) {
+    this->test_my_fc_perf(2, 64, 1280, 1280);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest01) {
+    this->test_my_fc_perf(2, 64, 1280, 3840);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest02) {
+    this->test_my_fc_perf(2, 256, 1280, 1280);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest03) {
+    this->test_my_fc_perf(2, 256, 1280, 3840);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest04) {
+    this->test_my_fc_perf(2, 1024, 640, 640);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest05) {
+    this->test_my_fc_perf(2, 1024, 640, 1920);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest06) {
+    this->test_my_fc_perf(2, 4096, 320, 320);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest07) {
+    this->test_my_fc_perf(2, 4096, 320, 960);
+}
+
+// case B
+TEST_F(fully_connected_gpu_tests, mytest10) {
+    this->test_my_fc_perf(2, 77, 768, 320);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest11) {
+    this->test_my_fc_perf(2, 77, 768, 640);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest12) {
+    this->test_my_fc_perf(2, 77, 768, 1280);
+}
+
+TEST_F(fully_connected_gpu_tests, mytest13) {
+    this->test_my_fc_perf(2, 77, 768, 2560);
+}
+
 
 using shared_dims = std::tuple<size_t, size_t, size_t>;
 using fully_connected_test_params = std::tuple<
@@ -3664,3 +3755,4 @@ TEST_F(fully_connected_gpu_tests, weights_reorder_shapes_update_cached) {
     this->test_weights_reorder_shapes_update(true);
 }
 
+// my test
