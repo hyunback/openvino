@@ -2034,11 +2034,20 @@ void layout_optimizer::select_preferred_formats_for_onednn(program_node& node, d
         GPU_DEBUG_IF(debug_config->disable_onednn_permute_fusion == 1)
             disable_permute_fuse_onednn_gemm = true;
         // Optimized out permute from permute-gemm pattern. i.e. permute -> gemm
-        if (node.is_type<gemm>() && !disable_permute_fuse_onednn_gemm && node.get_program().get_config().get_property(ov::intel_gpu::optimize_data)) {
+        // if (node.is_type<gemm>() && !disable_permute_fuse_onednn_gemm && node.get_program().get_config().get_property(ov::intel_gpu::optimize_data)) {
+        if (!disable_permute_fuse_onednn_gemm && node.get_program().get_config().get_property(ov::intel_gpu::optimize_data)) {
             // Only the formats below support permute opt out in gemm and permute pattern. For other formats, need to check the gemm performance.
             for (size_t idx = 0 ; idx < node.get_dependencies().size() ; idx++) {
-                if (node.get_dependency(idx).is_type<permute>()) {
-                    auto& pnode = node.get_dependency(idx);
+                // if (node.get_dependency(idx).is_type<permute>()) {
+                bool is_permute = node.get_dependency(idx).is_type<permute>();
+                bool is_reshape_permute = node.get_dependency(idx).is_type<reshape>() && node.get_dependency(idx).get_dependency(0).is_type<permute>();
+                bool is_reshape_reorder_permute = node.get_dependency(idx).is_type<reshape>() &&
+                                                    node.get_dependency(idx).get_dependency(0).is_type<reorder>() &&
+                                                    node.get_dependency(idx).get_dependency(0).get_dependency(0).is_type<permute>();
+                if (is_permute || is_reshape_permute || is_reshape_reorder_permute) {
+                    auto& pnode = is_permute ? node.get_dependency(idx) :
+                                    is_reshape_permute ? node.get_dependency(idx).get_dependency(0) :
+                                    node.get_dependency(idx).get_dependency(0).get_dependency(0);
                     if (pnode.has_fused_primitives()) {
                         continue;
                     }
@@ -2056,9 +2065,13 @@ void layout_optimizer::select_preferred_formats_for_onednn(program_node& node, d
                         pnode.set_preferred_output_fmt(0, format(static_cast<format::type>(fmt)));
                         pnode.can_be_optimized(true);
                         node.set_preferred_input_fmt(idx, format(static_cast<format::type>(fmt)));
-                        GPU_DEBUG_TRACE_DETAIL << pnode.id() << " is fused to onednn gemm user : " << node.id() << std::endl;
-                        GPU_DEBUG_TRACE_DETAIL << "    permute order : ";
-                        GPU_DEBUG_CODE(for (const auto& o : permute_order) GPU_DEBUG_TRACE_DETAIL << o << " "; GPU_DEBUG_TRACE_DETAIL << std::endl;)
+                        GPU_DEBUG_COUT << pnode.id() << " is fused to onednn gemm user : " << node.id() << ", " << fmt << std::endl;
+                        GPU_DEBUG_COUT << "    permute order : ";
+                        GPU_DEBUG_CODE(for (const auto& o : permute_order) std::cout << o << " "; std::cout << std::endl;)
+                        GPU_DEBUG_COUT << is_permute << ", " << is_reshape_permute << ", " << is_reshape_reorder_permute << ", idx: " << idx << std::endl;
+                        // GPU_DEBUG_TRACE_DETAIL << pnode.id() << " is fused to onednn gemm user : " << node.id() << std::endl;
+                        // GPU_DEBUG_TRACE_DETAIL << "    permute order : ";
+                        // GPU_DEBUG_CODE(for (const auto& o : permute_order) GPU_DEBUG_TRACE_DETAIL << o << " "; GPU_DEBUG_TRACE_DETAIL << std::endl;)
                     }
                }
             }

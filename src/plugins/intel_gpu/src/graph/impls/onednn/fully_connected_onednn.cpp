@@ -125,6 +125,8 @@ protected:
         auto weights_pshape = weights_layout.get_partial_shape();
 
         size_t input_size = (prim_input_size > input_pshape.size()) ? input_pshape.size() : prim_input_size;
+        GPU_DEBUG_COUT << "input_size: " << input_size << ", " << prim_input_size << ", "
+                        << input_pshape.size() << ", " << input_pshape.to_string() <<std::endl;
         int64_t feature = input_pshape[std::min(input_size, static_cast<size_t>(4)) - 1].get_length();
         if (input_size == 3) {
             feature = std::max({input_layout.spatial(0), input_layout.spatial(1), input_layout.spatial(2)});
@@ -152,15 +154,23 @@ protected:
         get_inner_product_primitive_descriptor(const kernel_impl_params& impl_params,
                                                cldnn::engine& engine,
                                                size_t prim_input_size,
-                                               bool has_bias,
+                                               bool has_bias, format my_format,
                                                const dnnl::primitive_attr& attr = dnnl::primitive_attr()) {
         auto input_layout = impl_params.get_input_layout(0);
         auto weights_layout = impl_params.get_input_layout(1);
         auto output_layout = impl_params.get_output_layout();
-
+        GPU_DEBUG_COUT << "input_layout0: " << input_layout.to_short_string() << ", prefer fmt: " << my_format << std::endl;
+        GPU_DEBUG_COUT << "weights_layout0: " << weights_layout.to_short_string() << std::endl;
+        GPU_DEBUG_COUT << "output_layout0: " << output_layout.to_short_string() << std::endl;
         transform_layouts(input_layout, weights_layout, output_layout, prim_input_size);
+        GPU_DEBUG_COUT << "input_layout1: " << input_layout.to_short_string() << ", prefer fmt: " << my_format << std::endl;
+        GPU_DEBUG_COUT << "weights_layout1: " << weights_layout.to_short_string() << std::endl;
+        GPU_DEBUG_COUT << "output_layout1: " << output_layout.to_short_string() << std::endl;
 
-        auto input_md = onednn::layout_to_memory_desc(input_layout, dnnl::memory::format_tag::undef, false);
+        auto my_tag = convert_data_format(my_format);
+        auto input_md = onednn::layout_to_memory_desc(input_layout, my_tag, false);
+
+        // auto input_md = onednn::layout_to_memory_desc(input_layout, dnnl::memory::format_tag::undef, false);
         auto weights_md = onednn::layout_to_memory_desc(weights_layout, dnnl::memory::format_tag::any);
         auto output_md = onednn::layout_to_memory_desc(output_layout, dnnl::memory::format_tag::ab, false);
 
@@ -294,7 +304,7 @@ public:
             auto prim_desc = get_matmul_primitive_descriptor(*impl_params, ib.get_engine(), input_size, has_bias, *_attrs);
             _pd = *prim_desc;
         } else {
-            auto prim_desc = get_inner_product_primitive_descriptor(*impl_params, ib.get_engine(), input_size, has_bias, *_attrs);
+            auto prim_desc = get_inner_product_primitive_descriptor(*impl_params, ib.get_engine(), input_size, has_bias, format::bfyx, *_attrs);
             _pd = *prim_desc;
         }
 
@@ -415,8 +425,10 @@ public:
             prim_onednn->_dzp_data_type = dzp_data_type;
             return prim_onednn;
         } else {
+            // GPU_DEBUG_COUT << impl_params.get_input_layout(0).to_short_string() << " vs " << arg.get_preferred_input_fmt(0) << std::endl;
+            GPU_DEBUG_COUT << arg.id() << ", prefer fmt: " << arg.get_preferred_input_fmt(0) << std::endl;
             auto prim_desc = get_inner_product_primitive_descriptor(impl_params, impl_params.prog->get_engine(),
-                                                                    prim->input_size, !prim->bias.empty(), *attr);
+                                                                    prim->input_size, !prim->bias.empty(), arg.get_preferred_input_fmt(0), *attr);
 
             return cldnn::make_unique<fully_connected_onednn>(engine, config, attr, *prim_desc, get_weights_reorder(impl_params, *prim_desc));
         }

@@ -53,6 +53,7 @@
 using namespace cldnn;
 
 void prepare_primitive_fusing::run(program& p) {
+    return;
     fuse_reorders(p);
     remove_redundant_reshape(p);
     fuse_bias(p);
