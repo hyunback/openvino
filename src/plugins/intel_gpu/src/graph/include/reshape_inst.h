@@ -43,28 +43,28 @@ public:
         if (get_users().size() == 1 && get_users().front()->is_type<rope>())
             return false;
 
-        auto axis = input().as<crop>().get_primitive()->axis;
-        const auto& input_pshape = input().get_output_layout(false).get_partial_shape();
-        auto input_rank = input_pshape.size();
-        auto input_last_dim = static_cast<int64_t>(input_rank - 1);
-        if (axis != input_last_dim || input_pshape[input_last_dim].is_dynamic())
-            return false;
+        // auto axis = input().as<crop>().get_primitive()->axis;
+        // const auto& input_pshape = input().get_output_layout(false).get_partial_shape();
+        // auto input_rank = input_pshape.size();
+        // auto input_last_dim = static_cast<int64_t>(input_rank - 1);
+        // if (axis != input_last_dim || input_pshape[input_last_dim].is_dynamic())
+        //     return false;
 
-        auto input_last_dim_val = input_pshape[input_last_dim].get_length();
-        const auto& output_pshape = prim->output_partial_shape;
-        // TODO: If the reshape's output shape is non constant, issue occurs
-        // during shape inference due to execution order at runtime
-        if ((output_pshape.size() != input_rank + 1) || prim->output_pattern.empty())
-            return false;
+        // auto input_last_dim_val = input_pshape[input_last_dim].get_length();
+        // const auto& output_pshape = prim->output_partial_shape;
+        // // TODO: If the reshape's output shape is non constant, issue occurs
+        // // during shape inference due to execution order at runtime
+        // if ((output_pshape.size() != input_rank + 1) || prim->output_pattern.empty())
+        //     return false;
 
-        int64_t mul = 1;
-        for (size_t i = input_rank - 1; i < output_pshape.size() ; i++) {
-            if (output_pshape[i].is_dynamic())
-                return false;
-            mul *= output_pshape[i].get_length();
-        }
-        if (input_last_dim_val != mul)
-            return false;
+        // int64_t mul = 1;
+        // for (size_t i = input_rank - 1; i < output_pshape.size() ; i++) {
+        //     if (output_pshape[i].is_dynamic())
+        //         return false;
+        //     mul *= output_pshape[i].get_length();
+        // }
+        // if (input_last_dim_val != mul)
+        //     return false;
 
         return true;
     }
@@ -102,7 +102,8 @@ public:
         if (this->is_output() || this->has_fused_primitives())
             return false;
 
-        if (input().get_output_layout(false).has_dynamic_pad() && is_runtime_propagatable_padding())
+        // if (input().get_output_layout(false).has_dynamic_pad() && is_runtime_propagatable_padding())
+        if (is_runtime_propagatable_padding())
             return true;
 
         if (has_padding())

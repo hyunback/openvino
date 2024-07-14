@@ -442,7 +442,7 @@ static void propagate_padding_to_opt_out_users(program_node& node, cldnn::paddin
         return;
 
     for (auto user : node.get_users()) {
-        if (user->can_be_optimized()) {
+        if (user->can_be_optimized() && !user->is_type<reshape>()) {
             user->merge_output_padding(padding_data);
             propagate_padding_to_opt_out_users(*user, padding_data);
         }
@@ -489,7 +489,8 @@ bool crop_in_place_optimization::match(const program_node& node,
                 return false;
             auto& reshape_node = user->as<reshape>();
             if (can_reshape_be_optimized(reshape_node) &&
-                (!node.is_dynamic() || !reshape_node.is_runtime_propagatable_padding()))
+                // (!node.is_dynamic() || !reshape_node.is_runtime_propagatable_padding()))
+                (!reshape_node.is_runtime_propagatable_padding()))
                 return false;
         }
         if (user->is_type<experimental_detectron_roi_feature_extractor>() && user->get_dependency_index(node) == 0)
@@ -628,7 +629,8 @@ void crop_in_place_optimization::update_in_place_crop_padding_simple_data_format
                                                                                  const tensor offsets,
                                                                                  size_t crop_axis,
                                                                                  bool is_runtime) {
-    auto crop_axis_legacy = crop_axis;
+    // auto crop_axis_legacy = crop_axis;
+    auto crop_axis_legacy = 2;  // SD TEST
     if (crop_axis_legacy >= 2) {
         auto spatial_axis = crop_axis_legacy - 2;
         // Default and minimum number of dimensions is 4
@@ -676,6 +678,15 @@ void crop_in_place_optimization::update_in_place_crop_padding_simple_data_format
         }
     } else {
         crop_layout.data_padding = padding(lower_sizes, upper_sizes);
+        for (auto& user_layout : user_layouts) {
+            auto reshape_rank = user_layout.get_partial_shape().size();
+            auto reshape_last_dim = user_layout.get_partial_shape().to_shape()[reshape_rank - 1];   // SD test
+            if (lower_sizes[crop_axis_legacy])
+                lower_sizes[crop_axis_legacy] /= reshape_last_dim;
+            if (upper_sizes[crop_axis_legacy])
+                upper_sizes[crop_axis_legacy] /= reshape_last_dim;
+            user_layout.data_padding = padding(lower_sizes, upper_sizes);
+        }
     }
 }
 
@@ -724,6 +735,9 @@ void prepare_buffer_fusing::run(program& p) {
             continue;
 
         program_helpers::do_for_types<reshape>(*node, [](reshape_node& node) {
+            // if (node.id().find("__module.down_blocks.0.attentions.0.transformer_blocks.0.attn1/aten::view/Reshape") != std::string::npos) {
+            //     GPU_DEBUG_COUT << "__module.down_blocks.0.attentions.0.transformer_blocks.0.attn1/aten::view/Reshape !!" << std::endl;
+            // }
             node.get_output_layout();
 
             // Optimizing at prepare_buffer_fusing could propagate a padded input of an input nodes to Reshape.

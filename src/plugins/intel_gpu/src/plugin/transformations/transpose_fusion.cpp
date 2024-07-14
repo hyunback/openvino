@@ -27,10 +27,23 @@ using ov::pass::pattern::op::Or;
 namespace ov {
 namespace intel_gpu {
 
+int get_env(std::string key, int &val);
+int get_env(std::string key, int &val) {
+    if (const auto env_var = std::getenv(key.c_str())) {
+        val = std::atoi(env_var);
+        return true;
+    }
+    return false;
+}
+
 TransposeFusion::TransposeFusion() {
     add_matcher<TransposeMatMulTransposeMatcher>();
     add_matcher<TransposeMatMulMatcher>();
-    add_matcher<TransposeSDPAMatcher>();
+    int val = 0;
+    get_env("TEST_SDPA", val);
+    if (val != 1) {
+        add_matcher<TransposeSDPAMatcher>();
+    }
 }
 
 TransposeSDPAMatcher::TransposeSDPAMatcher() {
