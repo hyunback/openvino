@@ -21,29 +21,19 @@
 #include "openvino/pass/pattern/op/any.hpp"
 #include "transformations/utils/utils.hpp"
 
+#include "openvino/op/variadic_split.hpp"
+
 using namespace ov::pass::pattern;
 using ov::pass::pattern::op::Or;
 
 namespace ov {
 namespace intel_gpu {
 
-int get_env(std::string key, int &val);
-int get_env(std::string key, int &val) {
-    if (const auto env_var = std::getenv(key.c_str())) {
-        val = std::atoi(env_var);
-        return true;
-    }
-    return false;
-}
 
 TransposeFusion::TransposeFusion() {
     add_matcher<TransposeMatMulTransposeMatcher>();
     add_matcher<TransposeMatMulMatcher>();
-    int val = 0;
-    get_env("TEST_SDPA", val);
-    if (val != 1) {
-        add_matcher<TransposeSDPAMatcher>();
-    }
+    add_matcher<TransposeSDPAMatcher>();
 }
 
 TransposeSDPAMatcher::TransposeSDPAMatcher() {
@@ -88,6 +78,17 @@ TransposeSDPAMatcher::TransposeSDPAMatcher() {
         auto sdpa = std::dynamic_pointer_cast<ov::op::v13::ScaledDotProductAttention>(m.get_match_root());
 
         if (!sdpa || transformation_callback(sdpa)) {
+            return false;
+        }
+
+        // test for SD
+        auto input_node_q_m = sdpa->get_input_node_shared_ptr(0)->get_input_node_shared_ptr(0)->get_input_node_shared_ptr(0);
+        auto input_node_k_m = sdpa->get_input_node_shared_ptr(1)->get_input_node_shared_ptr(0)->get_input_node_shared_ptr(0);
+        auto input_node_v_m = sdpa->get_input_node_shared_ptr(2)->get_input_node_shared_ptr(0)->get_input_node_shared_ptr(0);
+        auto vs_q = std::dynamic_pointer_cast<ov::op::v1::VariadicSplit>(input_node_q_m);
+        auto vs_k = std::dynamic_pointer_cast<ov::op::v1::VariadicSplit>(input_node_k_m);
+        auto vs_v = std::dynamic_pointer_cast<ov::op::v1::VariadicSplit>(input_node_v_m);
+        if (vs_q && vs_k && vs_v) {
             return false;
         }
 
