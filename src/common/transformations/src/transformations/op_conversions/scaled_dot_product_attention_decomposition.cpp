@@ -67,6 +67,7 @@ std::shared_ptr<ov::Node> ov::pass::ScaledDotProductAttentionDecomposition::deco
     auto one_i = register_new_node(v0::Constant::create(element::i32, Shape{}, {1}));
     auto one_f = register_new_node<v1::ConvertLike>(one_i, query);
     auto zero_f = register_new_node<v1::ConvertLike>(zero_i, query);
+    // std::cout << "ScaledDotProductAttentionDecomposition::decompose" << std::endl;
 
     Output<Node> scale;
     if (node->get_input_size() < 5) {

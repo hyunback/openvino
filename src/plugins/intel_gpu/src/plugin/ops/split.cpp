@@ -101,6 +101,12 @@ static void CreateCommonSplitOp(ProgramBuilder& p, const std::shared_ptr<ov::Nod
                 }
             }
 
+            // int64_t axis = -1;
+            // auto const_axis = std::dynamic_pointer_cast<ov::op::v0::Constant>(op->get_input_node_shared_ptr(1));
+            // if (const_axis) {
+            //     axis = ov::util::normalize_axis(op.get(), const_axis->cast_vector<int64_t>()[0], op->get_input_partial_shape(0).rank());
+            // }
+            // GPU_DEBUG_COUT << get_layer_name(i) << " : axis: " << axis << std::endl;
             auto offsetTensor = tensor_from_dims(start_offset, 0);
             auto outTensor = tensor_from_dims(op->get_output_shape(i), 1);
             auto cropPrim = cldnn::crop(get_layer_name(i), inputs[0], outTensor, offsetTensor);

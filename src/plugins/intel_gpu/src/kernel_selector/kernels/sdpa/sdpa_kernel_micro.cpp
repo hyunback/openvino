@@ -298,6 +298,8 @@ ParamsKey SDPAKernelMicro::GetSupportedKey() const {
 
     k.EnableInputLayout(DataLayout::bfyx);
     k.EnableOutputLayout(DataLayout::bfyx);
+    // k.EnableInputLayout(DataLayout::bfzyx);
+    // k.EnableOutputLayout(DataLayout::bfzyx);
 
     k.EnableDifferentTypes();
     k.EnableTensorOffset();
