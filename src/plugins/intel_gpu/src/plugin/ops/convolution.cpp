@@ -74,6 +74,7 @@ static void CreateConvolutionOp(ProgramBuilder& p, const std::shared_ptr<ov::int
                                                     op->get_output_element_type(0),
                                                     auto_pad);
     } else {
+        // std::cout << layerName << " --> " << op->get_output_element_type(0) << std::endl;
         prim = std::make_shared<cldnn::convolution>(layerName,
                                                     inputs[op::Convolution::Args::INPUT],
                                                     weights,
@@ -84,6 +85,7 @@ static void CreateConvolutionOp(ProgramBuilder& p, const std::shared_ptr<ov::int
                                                     pads_begin,
                                                     pads_end,
                                                     weights_have_group_dim,
+                                                    op->get_output_element_type(0),
                                                     auto_pad);
     }
 

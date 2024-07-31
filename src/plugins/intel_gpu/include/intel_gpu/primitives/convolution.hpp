@@ -91,8 +91,9 @@ struct convolution : public primitive_base<convolution> {
                 ov::CoordinateDiff padding_begin,
                 ov::CoordinateDiff padding_end,
                 bool grouped_weights_shape,
+                data_types output_data_type = data_types::undefined,    // just avoid build error in unit-test.
                 const ov::op::PadType& auto_pad = ov::op::PadType::EXPLICIT)
-        : primitive_base(id, {input}),
+         : primitive_base(id, {input}, 1,  {optional_data_type{output_data_type}}),
           groups(groups),
           stride(stride),
           dilation(dilation),

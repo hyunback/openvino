@@ -125,6 +125,7 @@ void pre_replace_deconv::run(program& p) {
                                                                pad_begin,
                                                                pad_end,
                                                                grouped_weights_shape,
+                                                               deconv_node.get_output_layout().data_type,   // just avoiding build error
                                                                ov::op::PadType::EXPLICIT);
                 conv_prim->transposed = true;
                 conv_prim->output_paddings = { output_padding };
@@ -264,6 +265,7 @@ void pre_replace_deconv::run(program& p) {
                                                                pad,
                                                                pad,
                                                                grouped_weights_shape,
+                                                               deconv_node.get_output_layout().data_type,   // just avoiding build error
                                                                ov::op::PadType::EXPLICIT);
                 conv_prim->output_paddings = {output_padding};
                 program_node& created_node = p.get_or_create(conv_prim);

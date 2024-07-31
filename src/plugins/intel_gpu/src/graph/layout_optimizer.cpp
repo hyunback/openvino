@@ -1342,7 +1342,8 @@ bool layout_optimizer::are_data_types_suitable_for_onednn(program_node& node) {
 
     // Generally, fp32 input does NOT use oneDNN
     if (in_dt == data_types::f32 &&
-        (!node.is_type<fully_connected>() && !node.is_type<convolution>() && !node.is_type<reorder>()))
+        // (!node.is_type<fully_connected>() && !node.is_type<convolution>() && !node.is_type<reorder>()))
+        (!node.is_type<fully_connected>() && !node.is_type<convolution>() && !node.is_type<reorder>()) && !node.is_type<gemm>())
           return false;
 
     if (in_dt == data_types::i64 || out_dt == data_types::i64)

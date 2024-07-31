@@ -28,11 +28,18 @@ std::vector<layout> calc_output_layout_impl(convolution_node const& node, kernel
     auto desc = impl_param.typed_desc<convolution>();
 
     auto input_layout = impl_param.get_input_layout(0);
-    auto input_type = input_layout.data_type;
-    auto output_type = (input_type == data_types::u8 || input_type == data_types::i8) ? data_types::f32 : input_type;
+    // auto input_type = input_layout.data_type;
+    auto output_type = desc->output_data_types[0].value_or(input_layout.data_type);
+    // GPU_DEBUG_COUT << node.id() << ": desc->output_data_types[0]: " << desc->output_data_types[0] << ", " << output_type << std::endl;
+    // output_type = (input_type == data_types::u8 || input_type == data_types::i8) ? data_types::f32 : input_type;
     if (impl_param.has_fused_primitives()) {
         output_type = impl_param.get_output_element_type();
+        //GPU_DEBUG_COUT << node.id() << " -> " << output_type << std::endl;
     }
+
+    // my test
+    // output_type = data_types::f32;
+    // GPU_DEBUG_COUT << node.id() << " final -> " << output_type << std::endl;
 
     auto weights_layout = *impl_param.weights_layout;
     weights_layout = weights_layout.convert_to_weights_layout(desc->grouped_weights_shape);

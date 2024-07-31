@@ -205,7 +205,8 @@ ConvolutionMatcher::ConvolutionMatcher() {
                 return false;
             groups = weights_shape[0].get_length();
         }
-
+        // std::cout << conv_node->get_name() << " : input0_type: " << conv_node->get_input_element_type(0) << std::endl;
+        // std::cout << conv_node->get_name() << " : output0_type: " << conv_node->get_output_element_type(0) << std::endl;
         auto new_conv = std::make_shared<op::Convolution>(pattern_map.at(input_m),
                                                           pattern_map.at(weights_m),
                                                           std::make_shared<op::Placeholder>(),

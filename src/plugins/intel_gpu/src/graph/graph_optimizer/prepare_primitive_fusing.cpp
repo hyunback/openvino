@@ -54,6 +54,7 @@
 using namespace cldnn;
 
 void prepare_primitive_fusing::run(program& p) {
+    // return;
     fuse_reorders(p);
     remove_redundant_reshape(p);
     fuse_bias(p);
@@ -435,6 +436,10 @@ void prepare_primitive_fusing::fuse_simple_primitives(program &p) {
         };
 
         auto conv_supports_fusings = [&](convolution_node& node) -> bool {
+            // my test
+            if (node.get_output_layout().data_type == data_types::f32)
+                return false;
+
             if (_lo.get_optimization_attributes().use_onednn_impls == 1 &&
                 _lo.get_preferred_impl_type(node, format::byxf /*dummy value to disable format checking*/) == impl_types::onednn) {
                 return true;

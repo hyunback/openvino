@@ -55,6 +55,7 @@
 #include "openvino/pass/pattern/op/wrap_type.hpp"
 #include "plugin/transformations/binary_conv_to_conv.hpp"
 #include "plugin/transformations/clamp_fp16_output.hpp"
+#include "plugin/transformations/conv_fp32_to_fp16.hpp"
 #include "plugin/transformations/convert_fc_to_compressed.hpp"
 #include "plugin/transformations/convert_matmul_to_fc.hpp"
 #include "plugin/transformations/convert_stridedslices_to_variadicsplit.hpp"
@@ -838,6 +839,9 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
         manager.register_pass<ov::intel_gpu::IndirectKVCache>();
         manager.register_pass<ov::intel_gpu::ConvertConvolutionToInternal>();
         manager.register_pass<ov::intel_gpu::ConvertStridedSlicesToVariadicSplit>();
+
+        // my test..
+        manager.register_pass<ov::intel_gpu::ConvFp32ToFp16>();
 
         const size_t zp_pad_size = device_info.supports_immad ? 16 : 32;
         manager.register_pass<ov::intel_gpu::BroadcastAndPadZeroPointBuffers>(zp_pad_size);
