@@ -50,6 +50,15 @@
 
 using namespace cldnn;
 
+int get_env(std::string key, int &val);
+int get_env(std::string key, int &val) {
+        if (const auto env_var = std::getenv(key.c_str())) {
+            val = std::atoi(env_var);
+            return true;
+        }
+        return false;
+}
+
 static size_t get_post_ops_count(const program_node& node) {
     size_t onednn_post_ops_count = 0;
     for (auto& fo : node.get_fused_primitives()) {
@@ -109,8 +118,11 @@ bool layout_optimizer::onednn_check_data_types_for_convolution(data_types in_dt,
     if ((in_dt == data_types::i8 || in_dt == data_types::u8) && wei_dt == data_types::i8 &&
         (out_dt == data_types::f32 || out_dt == data_types::i32 || out_dt == data_types::f16 || out_dt == data_types::i8 || out_dt == data_types::u8))
         return true;
+
+    int val = 0;
+    get_env("ONEDNN_CONV", val);
     if ((in_dt == data_types::f32 && wei_dt == data_types::f32) &&
-        (out_dt == data_types::i8 || out_dt == data_types::u8))
+        (out_dt == data_types::i8 || out_dt == data_types::u8 || (val && out_dt == data_types::f32)))
         return true;
     return false;
 }
@@ -1339,9 +1351,13 @@ bool layout_optimizer::are_data_types_suitable_for_onednn(program_node& node) {
     auto in_dt = node.get_input_layout(0).data_type;
     auto out_dt = node.get_output_layout(false).data_type;
 
+    int val = 0;
+    get_env("ONEDNN_GEMM", val);
+
     // Generally, fp32 input does NOT use oneDNN
     if (in_dt == data_types::f32 &&
-        (!node.is_type<fully_connected>() && !node.is_type<convolution>() && !node.is_type<reorder>()))
+        (!node.is_type<fully_connected>() && !node.is_type<convolution>() && !node.is_type<reorder>()) &&
+            (!val || !node.is_type<gemm>()))
           return false;
 
     if (in_dt == data_types::i64 || out_dt == data_types::i64)
