@@ -706,8 +706,22 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
         }
     }
 
+    for (auto n : p.get_processing_order()) {
+        if (n->id().find("__module.mid_block.resnets.0/aten::unsqueeze/Unsqueeze") != std::string::npos) {
+            GPU_DEBUG_COUT << n->id() << " -> " << n->get_output_layout().format.to_string() << std::endl;
+            GPU_DEBUG_COUT << n->get_preferred_input_fmt() << " , " << n->get_preferred_output_fmt() << std::endl;
+        }
+    }
+
     propagate_formats(p, fmt_map, lo);
     minimize_local_reorders(p, fmt_map, lo);
+
+    for (auto n : p.get_processing_order()) {
+        if (n->id().find("__module.mid_block.resnets.0/aten::unsqueeze/Unsqueeze") != std::string::npos) {
+            GPU_DEBUG_COUT << n->id() << " -> " << n->get_output_layout().format.to_string() << std::endl;
+            GPU_DEBUG_COUT << n->get_preferred_input_fmt() << " , " << n->get_preferred_output_fmt() << std::endl;
+        }
+    }
 
     GPU_DEBUG_LOG_PASS << "Selected formats:" << std::endl;
     for (auto node_ptr : p.get_processing_order()) {
@@ -754,7 +768,21 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
     insert_reorders(p, fmt_map, rf, lo);
 
     for (auto n : p.get_processing_order()) {
+        if (n->id().find("__module.mid_block.resnets.0/aten::unsqueeze/Unsqueeze") != std::string::npos) {
+            GPU_DEBUG_COUT << n->id() << " -> " << n->get_output_layout().format.to_string() << std::endl;
+            GPU_DEBUG_COUT << n->get_preferred_input_fmt() << " , " << n->get_preferred_output_fmt() << std::endl;
+        }
+    }
+
+    for (auto n : p.get_processing_order()) {
         n->recalc_output_layouts(true);
+    }
+
+    for (auto n : p.get_processing_order()) {
+        if (n->id().find("__module.mid_block.resnets.0/aten::unsqueeze/Unsqueeze") != std::string::npos) {
+            GPU_DEBUG_COUT << n->id() << " -> " << n->get_output_layout().format.to_string() << std::endl;
+            GPU_DEBUG_COUT << n->get_preferred_input_fmt() << " , " << n->get_preferred_output_fmt() << std::endl;
+        }
     }
 
     const auto reorder_input_detection_output = [&p, &rf](typed_program_node<detection_output>& detection_output_node) {
@@ -1002,6 +1030,39 @@ void reorder_inputs::run(program& p, layout_optimizer& lo, reorder_factory& rf) 
             }
         }
     }
+
+    // for (auto& node : p.get_processing_order()) {
+    //     if (node->id().find("module.up_blocks.3.resnets.2.time_mixer") != std::string::npos) {
+    //         std::cout << "module.up_blocks.3.resnets.2.time_mixer" << std::endl;
+    //     }
+    //     if (node->get_preferred_impl_type() == impl_types::cpu) {
+    //         auto dep = node->get_dependency_with_port(0);
+    //         const auto& input = dep.first;
+    //         auto in0_dt = input->get_output_layout().data_type;
+    //         for (size_t i = 1; i < node->get_dependencies().size(); ++i) {
+    //             if (in0_dt != node->get_dependency(i).get_output_layout().data_type) {
+    //                 auto input_layout = node->get_dependency(i).get_output_layout();
+    //                 auto new_layout = input_layout;
+    //                 new_layout.data_type = in0_dt;
+    //                 auto new_input = rf.get_reorder(input->id(), dep.second, input_layout, new_layout);
+    //                 if (new_input.first) {
+    //                     p.add_intermediate(new_input.first, *node, i);
+    //                 }
+    //     // auto dep = pooling_node.get_dependency_with_port(0);
+    //     // const auto& input = dep.first;
+    //     // auto input_layout = input->get_output_layout();
+    //     // if (pooling_node.get_primitive()->mode == pooling_mode::max && input_layout.data_type == data_types::i32) {
+    //     //     auto new_layout = input_layout;
+    //     //     new_layout.data_type = data_types::f32;
+    //     //     auto new_input = rf.get_reorder(input->id(), dep.second, input_layout, new_layout);
+    //     //     if (new_input.first) {
+    //     //        p.add_intermediate(new_input.first, pooling_node, 0);
+    //     //     }
+    //     // }
+    //             }
+    //         }
+    //     }
+    // }
 
     // WA for OneDNN binary add fusions: we need to broadcast batch dimension to avoid situation with
     // batch dimension mismatch in OneDNN tensor descriptors as follow:

@@ -147,6 +147,9 @@ layout reshape_inst::calc_output_layout(reshape_node const& node, kernel_impl_pa
 
 template<typename ShapeType>
 std::vector<layout> reshape_inst::calc_output_layouts(reshape_node const& node, const kernel_impl_params& impl_param) {
+    // if (node.id().find("__module.mid_block.resnets.0/aten::unsqueeze/Unsqueeze") != std::string::npos) {
+    //     GPU_DEBUG_COUT << "!!!!!" << std::endl;
+    // }
     assert(static_cast<bool>(impl_param.typed_desc<reshape>()->output_data_types[0]) == false &&
            "Output data type forcing is not supported for reshape_node!");
     auto prim = impl_param.typed_desc<reshape>();

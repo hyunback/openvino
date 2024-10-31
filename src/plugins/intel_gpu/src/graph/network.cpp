@@ -1000,7 +1000,7 @@ void network::execute_impl(const std::vector<event::ptr>& events) {
                 }
             }
         }
-        if (!is_internal()) exit(0);
+        // if (!is_internal()) exit(0);
     }
     auto get_iteration_prefix = [](int64_t iter) {
         if (iter < 0)

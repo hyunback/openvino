@@ -1515,6 +1515,9 @@ impl_types layout_optimizer::get_preferred_impl_type(program_node& node, format 
     if (forced_impl != impl_types::any)
         return forced_impl;
 
+    if (node.id().find("module.up_blocks.3.resnets.2.time_mixer") != std::string::npos) {
+        std::cout << node.id() << std::endl;
+    }
     if (node.is_in_shape_of_subgraph() && !node.is_type<reshape>())
         return impl_types::cpu;
 
@@ -1784,6 +1787,9 @@ format layout_optimizer::get_preferred_format(program_node& node) {
         // to add reorder in front of reshape in reorder_input stage instead of handle_reshpae stage.
         // It is only applied for the dynamic shape with static input shape
         if (!node.is_dynamic() &&  has_reshape_user(node))
+            return format::get_default_format(out_lay_rank);
+
+        if (node.is_type<reshape>())
             return format::get_default_format(out_lay_rank);
 
         if (node.is_type<shape_of>())

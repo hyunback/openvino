@@ -59,6 +59,7 @@ attach_group_normalization_impl::attach_group_normalization_impl() {
             format::bfyx,
             format::bfzyx,
             format::b_fs_yx_fsv16,
+            // sformat::b_fs_zyx_fsv16,
     };
 
     implementation_map<group_normalization>::add(impl_types::ocl, shape_types::static_shape,
@@ -69,6 +70,7 @@ attach_group_normalization_impl::attach_group_normalization_impl() {
     const std::vector<format::type> dyn_formats {
         format::bfyx,
         format::b_fs_yx_fsv16,
+        // format::b_fs_zyx_fsv16,
     };
 
     implementation_map<group_normalization>::add(impl_types::ocl, shape_types::dynamic_shape,

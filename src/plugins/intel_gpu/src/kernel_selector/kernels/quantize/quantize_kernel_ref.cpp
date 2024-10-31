@@ -71,5 +71,6 @@ bool QuantizeKernelRef::Validate(const Params& p) const {
 
 KernelsPriority QuantizeKernelRef::GetKernelsPriority(const Params& /*params*/) const {
     return DONT_USE_IF_HAVE_SOMETHING_ELSE;
+    // return FORCE_PRIORITY_1;
 }
 }  // namespace kernel_selector

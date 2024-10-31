@@ -87,6 +87,7 @@ void handle_reshape::run(program& p) {
             auto& input_node = *dep.first;
             auto& input_port = dep.second;
 
+            // if (input_node.is_type<reorder>() && !input_node.is_dynamic())
             if (input_node.is_type<reorder>())
                 continue;
 
@@ -235,9 +236,10 @@ void handle_reshape::run(program& p) {
                     p.add_intermediate(reshape_input_node, *node, 0, reshape_input_node.get_dependencies().empty());
                     reshape_input_node.recalc_output_layout();
                 }
-
+                // node->recalc_output_layout();
                 // Check whether output reorder is required for format change
                 if (reshape_layout.format != target_format) {
+                // if (reshape_layout.format != target_format && !node->get_users().front()->is_type<reshape>()) {
                     auto reshape_users = node->get_users();
                     for (const auto& user : reshape_users) {
                         auto reshape_output = std::make_shared<reorder>("reorder:_reshape_output_" + node->id(),
@@ -256,6 +258,37 @@ void handle_reshape::run(program& p) {
                     node->recalc_output_layout();
                 }
             }
+            // if (!(node->is_output()) && (reshape_layout.format != target_format)) {
+            //     auto target_layout = layout({reshape_layout.get_partial_shape(), reshape_layout.data_type, target_format});
+            //     // when some primitive does an implicit reorder to some other format then we lose the info about pitches
+            //     // in reshape stage we assume user provides the input vector in bfyx
+            //     if (!reshape_layout.compatible(target_layout)) {
+            //         auto reshape_input = std::make_shared<reorder>("reorder:_reshape_input_" + node->id(),
+            //                                                        cldnn::input_info(input_node.id(), input_port),
+            //                                                        target_format,
+            //                                                        reshape_layout.data_type);
+            //         GPU_DEBUG_LOG << "reshape_handler: " << reshape_input->id
+            //             << " input_info : " << reshape_input->dependencies().front().to_string() << std::endl;
+            //         auto& reshape_input_node = p.get_or_create(reshape_input);
+            //         p.add_intermediate(reshape_input_node, *node, 0, reshape_input_node.get_dependencies().empty());
+            //         reshape_input_node.recalc_output_layout();
+
+            //         auto reshape_users = node->get_users();
+            //         for (const auto& user : reshape_users) {
+            //             auto reshape_output = std::make_shared<reorder>("reorder:_reshape_output_" + node->id(),
+            //                                                             user->id(),
+            //                                                             reshape_layout.format,
+            //                                                             reshape_layout.data_type);
+            //             auto& reshape_output_node = p.get_or_create(reshape_output);
+            //             p.add_intermediate(reshape_output_node,
+            //                                *user,
+            //                                *node,
+            //                                reshape_output_node.get_dependencies().empty());
+            //             reshape_output_node.recalc_output_layout();
+            //         }
+            //         node->recalc_output_layout();
+            //     }
+            // }
         }
     }
 }

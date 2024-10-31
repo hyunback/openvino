@@ -168,6 +168,10 @@ KernelsPriority GemmKernelMMADint8::GetKernelsPriority(const Params& params) con
     GemmTuningData tuning_data = InitGemmTuningData(prim_params);
     auto mmad_operations_number = GetMmadOperationsNumber(tuning_data);
 
+    // if (params.layerID.find("__module.up_blocks.3.attentions.1.transformer_blocks.0.attn1/aten::baddbmm/Multiply_1") != std::string::npos) {
+    //     return DONT_USE_IF_HAVE_SOMETHING_ELSE;
+    // }
+
     return mmad_operations_number < 4096 ? DONT_USE_IF_HAVE_SOMETHING_ELSE : FORCE_PRIORITY_3;
 }
 
