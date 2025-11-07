@@ -1026,6 +1026,16 @@ void layout_optimizer::set_onednn_dyn_conv_preferred_format(convolution_node& no
             node.set_preferred_output_fmt(0, format::get_default_format(rank));
         }
     }
+    // test for shapeless conv.
+    if (input_layout.get_partial_shape().size() <= 4)
+        node.set_preferred_input_fmt(0, cldnn::format::byxf);
+    else
+        node.set_preferred_input_fmt(0, cldnn::format::bzyxf);
+
+    if (output_layout.get_partial_shape().size() <= 4)
+        node.set_preferred_output_fmt(0, cldnn::format::byxf);
+    else
+        node.set_preferred_output_fmt(0, cldnn::format::bzyxf);
 }
 
 format layout_optimizer::get_expected_format(convolution_node const& node) {
