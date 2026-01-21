@@ -10,6 +10,23 @@
 #include <string>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 // NOTE: Due to buggy scope transition of warnings we need to disable warning in place of use/instantation
 //       of some types (even though we already disabled them in scope of definition of these types).
 //       Moreover this warning is pretty much now only for annoyance: it is generated due to lack
@@ -198,9 +215,12 @@ std::map<std::string, device::ptr> ocl_device_detector::get_available_devices(vo
 }
 
 std::vector<device::ptr> ocl_device_detector::create_device_list() const {
+    GPU_DEBUG_COUT << "clGetPlatformIDs start: " << get_current_working_set_mb() << std::endl;
     cl_uint num_platforms = 0;
     // Get number of platforms available
     cl_int error_code = clGetPlatformIDs(0, NULL, &num_platforms);
+    GPU_DEBUG_COUT << "clGetPlatformIDs end: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     if (num_platforms == 0 || error_code == CL_PLATFORM_NOT_FOUND_KHR) {
         return {};
     }
@@ -210,7 +230,6 @@ std::vector<device::ptr> ocl_device_detector::create_device_list() const {
     std::vector<cl_platform_id> platform_ids(num_platforms);
     error_code = clGetPlatformIDs(num_platforms, platform_ids.data(), NULL);
     OPENVINO_ASSERT(error_code == CL_SUCCESS, create_device_error_msg, "[GPU] clGetPlatformIDs error code: ", std::to_string(error_code));
-
     std::vector<device::ptr> supported_devices;
     for (auto& id : platform_ids) {
         cl::Platform platform = cl::Platform(id);

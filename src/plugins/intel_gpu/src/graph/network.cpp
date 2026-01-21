@@ -56,6 +56,18 @@
 #include <thread>
 #endif
 
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 namespace cldnn {
 namespace {
 
@@ -165,9 +177,11 @@ network::network(program::ptr program, stream::ptr stream, bool is_internal, boo
     if (!_internal) {
         net_id = get_unique_net_id();
     }
-
     calculate_weights_cache_capacity();
+    GPU_DEBUG_COUT << "network::network() allocate_primitives START " << get_current_working_set_mb() << std::endl;
     allocate_primitives();
+    GPU_DEBUG_COUT << "network::network() allocate_primitives END" << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
     configure_primitives_second_output();
     build_insts_deps();
     build_exec_order();

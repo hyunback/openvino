@@ -146,7 +146,8 @@ memory::ptr ocl_engine::allocate_memory(const layout& layout, allocation_type ty
     OPENVINO_ASSERT(!layout.is_dynamic() || layout.has_upper_bound(), "[GPU] Can't allocate memory for dynamic layout");
 
     check_allocatable(layout, type);
-
+    // GPU_DEBUG_COUT << layout.to_short_string() << ", type: " << static_cast<int>(type) << ", reset: " << reset << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
     try {
         memory::ptr res = nullptr;
         if (layout.format.is_image_2d()) {
@@ -155,6 +156,8 @@ memory::ptr ocl_engine::allocate_memory(const layout& layout, allocation_type ty
             res = std::make_shared<ocl::gpu_buffer>(this, layout);
         } else {
             res = std::make_shared<ocl::gpu_usm>(this, layout, type);
+            // GPU_DEBUG_COUT << "std::make_shared<ocl::gpu_usm>(this, layout, type) END" << std::endl;
+            // std::this_thread::sleep_for(std::chrono::seconds(10));
         }
 
         if (reset || res->is_memory_reset_needed(layout)) {

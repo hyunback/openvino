@@ -12,6 +12,23 @@
 #include "registry/implementation_manager.hpp"
 #include "registry/registry.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 using namespace cldnn;
 
 void compile_graph::run(program& p) {
@@ -28,13 +45,15 @@ void compile_graph::run(program& p) {
     std::vector<ov::threading::Task> tasks;
     std::exception_ptr exception;
 
+    // GPU_DEBUG_COUT << "compile_graph run start" << std::endl;
+
     for (size_t idx = 0; idx < proc_order.size(); idx++) {
         const auto& node = *(std::next(proc_order.begin(), idx));
 
         bool can_select_impl = !node->is_type<data>() && !(node->is_type<mutable_data>() && node->get_dependencies().empty());
 
         if (can_select_impl) {
-            tasks.emplace_back([node, &exception] {
+            tasks.emplace_back([node, &exception, idx] {
                 try {
                     const auto& params = node->get_kernel_impl_params();
                     auto shape_type = ImplementationManager::get_shape_type(*params);
@@ -47,6 +66,7 @@ void compile_graph::run(program& p) {
                     } catch (std::exception& e) {
                         fail_reason = e.what();
                     }
+                    // GPU_DEBUG_COUT << "idx: " << idx << ", id: " << node->id() << " : " << get_current_working_set_mb() << std::endl;
 
                     OPENVINO_ASSERT(shape_type == shape_types::dynamic_shape || node->selected_impl != nullptr,
                                     "[GPU] Failed to select implementation for"

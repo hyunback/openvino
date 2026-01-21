@@ -42,6 +42,8 @@ ov::ICompiledModel::ICompiledModel(const std::shared_ptr<const ov::Model>& model
       m_task_executor(task_executor),
       m_callback_executor(callback_executor) {
     OPENVINO_ASSERT(m_plugin);
+    std::cout << "icompiled_model.cpp ov::ICompiledModel::ICompiledModel start" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     if (model) {
         // Initialize inputs/outputs
         std::unordered_set<std::string> leaf_names;
@@ -93,6 +95,8 @@ ov::ICompiledModel::ICompiledModel(const std::shared_ptr<const ov::Model>& model
             new_param->validate_and_infer_types();
             m_inputs.emplace_back(new_param->output(0));
         }
+        // std::cout << "icompiled_model.cpp ov::ICompiledModel::ICompiledModel 11111" << std::endl;
+        // std::this_thread::sleep_for(std::chrono::seconds(1));
         for (const auto& result : model->get_results()) {
             auto fake_param = std::make_shared<ov::op::v0::Parameter>(result->get_output_element_type(0),
                                                                       result->get_output_partial_shape(0));
@@ -124,6 +128,8 @@ ov::ICompiledModel::ICompiledModel(const std::shared_ptr<const ov::Model>& model
             }
             m_outputs.emplace_back(new_result->output(0));
         }
+        // std::cout << "icompiled_model.cpp ov::ICompiledModel::ICompiledModel 2222" << std::endl;
+        // std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 }
 

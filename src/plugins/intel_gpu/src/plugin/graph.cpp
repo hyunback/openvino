@@ -38,17 +38,38 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 namespace ov::intel_gpu {
 
 Graph::Graph(std::shared_ptr<ov::Model> model, const RemoteContextImpl::Ptr& context, const ExecutionConfig& config, uint16_t stream_id)
     : m_context(context)
     , m_config(config)
     , m_stream_id(stream_id) {
-    auto program_builder = std::make_shared<ProgramBuilder>(model, get_engine(), config);
+    GPU_DEBUG_COUT << "Graph start: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
+    auto program_builder = std::make_shared<ProgramBuilder>(model, get_engine(), config);   // 70M: build_program
     m_config = program_builder->get_config();
-
-    build(program_builder->get_compiled_program());
-
+    GPU_DEBUG_COUT << "ProgramBuilder gen END: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
+    build(program_builder->get_compiled_program());             // 30M: gen network
+    GPU_DEBUG_COUT << "ProgramBuilder.build END: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
     primitiveIDs = program_builder->primitive_ids;
     inputPrimitiveIDs = program_builder->inputPrimitiveIDs;
     prevPrimitiveIDs = program_builder->prevPrimitiveIDs;

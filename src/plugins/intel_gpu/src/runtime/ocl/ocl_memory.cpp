@@ -504,7 +504,10 @@ gpu_usm::gpu_usm(ocl_engine* engine, const layout& layout, allocation_type type)
     if (engine->get_enable_large_allocations()) {
         properties = {CL_MEM_FLAGS, CL_MEM_ALLOW_UNRESTRICTED_SIZE_INTEL, 0};
     }
-
+    // GPU_DEBUG_COUT << static_cast<int>(get_allocation_type()) << ", actual_bytes_count: " << actual_bytes_count << std::endl;
+    // just test
+    // if (type == allocation_type::usm_host)
+    //     type = allocation_type::usm_device;
     switch (get_allocation_type()) {
     case allocation_type::usm_host:
         _buffer.allocateHost(actual_bytes_count, &properties[0]);

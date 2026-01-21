@@ -12,6 +12,23 @@
 #include "transformations/common_optimizations/fused_names_cleanup.hpp"
 #include "transformations/rt_info/fused_names_attribute.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 namespace {
 
 std::unordered_set<std::string> get_removed_nodes(const std::shared_ptr<const ov::Model>& original_model,
@@ -76,7 +93,11 @@ std::shared_ptr<ov::ICompiledModel> ov::IPlugin::compile_model(const std::string
                                                                const ov::AnyMap& properties) const {
     auto core = get_core();
     OPENVINO_ASSERT(core);
+    std::cout << "iplugin.cpp core->read_model start: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     const auto model = core->read_model(model_path, {}, properties);
+    std::cout << "iplugin.cpp core->read_model end: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     auto local_properties = properties;
     if (!ov::is_virtual_device(get_device_name())) {
         CoreConfig::remove_core(local_properties);

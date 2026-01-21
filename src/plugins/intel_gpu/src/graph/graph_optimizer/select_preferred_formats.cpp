@@ -17,6 +17,22 @@
 #include <iostream>
 #include <sstream>
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
 
 using namespace cldnn;
 
@@ -66,14 +82,14 @@ static void optimize_conv_permute(program_node& node) {
 
 void select_preferred_formats::run(program& p) {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "pass::select_preferred_formats");
-
+    GPU_DEBUG_COUT << "select_preferred_formats run start" << ": " << get_current_working_set_mb() << std::endl;
 #ifdef ENABLE_ONEDNN_FOR_GPU
     auto& engine = p.get_engine();
     if (!p.get_layout_optimizer().is_empty_onednn_impls_optimization_attribute()) {
         engine.create_onednn_engine(p.get_config());
     }
 #endif  // ENABLE_ONEDNN_FOR_GPU
-
+    GPU_DEBUG_COUT << "engine.create_onednn_engine END :" << get_current_working_set_mb() << std::endl;
     auto forcing_map = p.get_config().get_force_implementations();
 
     for (auto n : p.get_processing_order()) {

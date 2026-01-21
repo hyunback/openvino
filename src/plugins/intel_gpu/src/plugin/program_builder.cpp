@@ -32,6 +32,24 @@
 #endif
 
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
+
 namespace ov::intel_gpu {
 
 const cldnn::primitive_id ProgramBuilder::m_preProcessTag("_cldnn_input_preprocess");
@@ -70,6 +88,8 @@ ProgramBuilder::ProgramBuilder(std::shared_ptr<ov::Model> model, cldnn::engine& 
     , m_task_executor(task_executor)
     , m_compilation_context(compilation_context)
     , m_is_inner_program(is_inner_program) {
+    // GPU_DEBUG_COUT << "ProgramBuilder::ProgramBuilder() start" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     if (m_task_executor == nullptr)
         m_task_executor = cldnn::program::make_task_executor(m_config);
 
@@ -107,7 +127,11 @@ ProgramBuilder::ProgramBuilder(std::shared_ptr<ov::Model> model, cldnn::engine& 
     CustomLayer::LoadFromFile(custom_layers_config, m_custom_layers, custom_layers_config.empty());
 
     auto ops = model->get_ordered_ops();
+    // GPU_DEBUG_COUT << "model->get_ordered_ops()" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     m_program = build(ops, is_inner_program);
+    // GPU_DEBUG_COUT << "rogramBuilder::ProgramBuilder() END" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
 }
 
 ProgramBuilder::ProgramBuilder(cldnn::engine& engine, const ExecutionConfig& config)
@@ -141,13 +165,36 @@ std::shared_ptr<cldnn::program> ProgramBuilder::build(const std::vector<std::sha
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "ProgramBuilder::build");
 
     prepare_build();
+    GPU_DEBUG_COUT << "prepare_build(): " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     {
         GPU_DEBUG_DEFINE_MEM_LOGGER("CreateSingleLayerPrimitives");
+        // const std::string target_op_name = "bert.embeddings.word_embeddings.weight";
+        // std::shared_ptr<ov::Node> target_op = nullptr;
+
+        // for (const auto& op : ops) {
+        //     if (op->get_friendly_name() == target_op_name) {
+        //         target_op = op;
+        //         break;
+        //     }
+        // }
+        // if (target_op) {
+        //     GPU_DEBUG_COUT << "Prioritizing allocation for: " << target_op_name << std::endl;
+        //     CreateSingleLayerPrimitive(target_op);
+        // }
+
+        // for (const auto& op : ops) {
+        //     if (op->get_friendly_name() == target_op_name) {
+        //         continue;
+        //     }
+        //     CreateSingleLayerPrimitive(op);
+        // }
         for (const auto& op : ops) {
             CreateSingleLayerPrimitive(op);
         }
     }
-
+    GPU_DEBUG_COUT << "CreateSingleLayerPrimitive() END: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(10));
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "ProgramBuilder::CreateProgram");
     cldnn::program::ptr program;
     try {
@@ -163,7 +210,8 @@ std::shared_ptr<cldnn::program> ProgramBuilder::build(const std::vector<std::sha
         OPENVINO_ASSERT(false, "[GPU] ProgramBuilder build failed!\n", e.what());
     }
     cleanup_build();
-
+    // GPU_DEBUG_COUT << "cleanup_build()" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     return program;
 }
 
@@ -198,8 +246,8 @@ bool ProgramBuilder::is_op_supported(const std::shared_ptr<ov::Node>& op) {
 
 void ProgramBuilder::CreateSingleLayerPrimitive(const std::shared_ptr<ov::Node>& op) {
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "ProgramBuilder::CreateSingleLayerPrimitive");
-    GPU_DEBUG_LOG << "Process " << "op::" << op->get_type_info().version_id << "::" << op->get_type_name() << " operation "
-                  << "(friendly_name=" << op->get_friendly_name() << ")" << std::endl;
+    // GPU_DEBUG_COUT << "Process " << "op::" << op->get_type_info().version_id << "::" << op->get_type_name() << " operation "
+    //               << "(friendly_name=" << op->get_friendly_name() << ")" << std::endl;
 
     bool is_created = false;
     const ov::NodeTypeInfo* op_type_info = &op->get_type_info();
@@ -224,6 +272,9 @@ void ProgramBuilder::CreateSingleLayerPrimitive(const std::shared_ptr<ov::Node>&
                        " of type ", op->get_type_name(),
                        "(", op->get_type_info().version_id, ") is not supported");
     }
+    // GPU_DEBUG_COUT << "op->get_friendly_name() END" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(0));
+
 }
 
 std::vector<cldnn::input_info> ProgramBuilder::GetInputInfo(const std::shared_ptr<ov::Node>& op) const {

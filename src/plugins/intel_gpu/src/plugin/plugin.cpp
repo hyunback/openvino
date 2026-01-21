@@ -46,6 +46,23 @@
 #include "transformations/rt_info/fused_names_attribute.hpp"
 #include "transformations/utils/utils.hpp"
 
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 // Undef DEVICE_TYPE macro which can be defined somewhere in windows headers as DWORD and conflict with our metric
 #ifdef DEVICE_TYPE
 #undef DEVICE_TYPE
@@ -212,10 +229,14 @@ std::map<std::string, RemoteContextImpl::Ptr> Plugin::get_default_contexts() con
     });
     return m_default_contexts;
 }
-
+long long MY_SLEEP=0;
 Plugin::Plugin() {
+    GPU_DEBUG_COUT << "Plugin() start: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     set_device_name("GPU");
     register_primitives();
+    GPU_DEBUG_COUT << "gpu:plugin.cpp - Plugin() register_primitives(): " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
 
     // Set OCL runtime which should be always available
 #ifdef OV_GPU_WITH_SYCL
@@ -223,6 +244,8 @@ Plugin::Plugin() {
 #else
     cldnn::device_query device_query(cldnn::engine_types::ocl, cldnn::runtime_types::ocl);
 #endif
+    GPU_DEBUG_COUT << "gpu:plugin.cpp - Plugin() device_query: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     m_device_map = device_query.get_available_devices();
 
     // Set default configs for each device
@@ -233,9 +256,13 @@ Plugin::Plugin() {
     // Set common info for compiled_model_runtime_properties
     auto& ov_version = ov::get_openvino_version();
     m_compiled_model_runtime_properties["OV_VERSION"] = ov_version.buildNumber;
+    GPU_DEBUG_COUT << "gpu:plugin.cpp - Plugin() END: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
 }
 
 std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<const ov::Model>& model, const ov::AnyMap& orig_config) const {
+    GPU_DEBUG_COUT << "compile_model start: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::compile_model");
     std::string device_id = get_device_id(orig_config);
 
@@ -245,10 +272,13 @@ std::shared_ptr<ov::ICompiledModel> Plugin::compile_model(const std::shared_ptr<
 
     ExecutionConfig config = m_configs_map.at(device_id);
     config.set_user_property(orig_config, OptionVisibility::RELEASE);
-
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     auto transformed_model = clone_and_transform_model(model, config, context);
-
+    GPU_DEBUG_COUT << "clone_and_transform_model: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     config.finalize(context.get(), transformed_model.get());
+    GPU_DEBUG_COUT << "config.finalize: " << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     {
         OV_ITT_SCOPED_TASK(itt::domains::intel_gpu_plugin, "Plugin::compile_model::CreateCompiledModel");
         return std::make_shared<CompiledModel>(transformed_model, shared_from_this(), context, config);

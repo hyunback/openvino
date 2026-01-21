@@ -62,11 +62,15 @@ CompiledModel::CompiledModel(std::shared_ptr<ov::Model> model,
       m_inputs(ov::ICompiledModel::inputs()),
       m_outputs(ov::ICompiledModel::outputs()),
       m_loaded_from_cache(false) {
+    GPU_DEBUG_COUT << "CompiledModel::CompiledModel Graph before : m_config.get_num_streams() : " << m_config.get_num_streams() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     auto graph_base = std::make_shared<Graph>(model, m_context, m_config, 0);
     for (uint16_t n = 0; n < m_config.get_num_streams(); n++) {
         auto graph = n == 0 ? graph_base : std::make_shared<Graph>(graph_base, n);
         m_graphs.push_back(graph);
     }
+    GPU_DEBUG_COUT << "compiled_model.cpp CompiledModel::CompiledModel Graph after" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 
 CompiledModel::CompiledModel(cldnn::BinaryInputBuffer& ib,

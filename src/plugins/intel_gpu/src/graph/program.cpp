@@ -107,6 +107,24 @@
 #include <sys/resource.h>
 #endif
 
+
+#ifdef _WIN32
+#include <windows.h>
+#include <psapi.h>
+#endif
+
+// Helper function to get the current Working Set in MB
+static double get_current_working_set_mb() {
+#ifdef _WIN32
+    PROCESS_MEMORY_COUNTERS_EX pmc;
+    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
+        // WorkingSetSize is in bytes, convert to MB
+        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
+    }
+#endif
+    return 0.0;
+}
+
 using namespace cldnn;
 using namespace ov::intel_gpu;
 
@@ -159,6 +177,8 @@ program::program(engine& engine_ref,
       is_internal(is_internal),
       _is_body_program(is_body_program),
       _compilation_context(compilation_context) {
+    // GPU_DEBUG_COUT << "program::program start" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     init_primitives();
     _config.finalize(_engine);
     _engine.set_enable_large_allocations(_config.get_enable_large_allocations());
@@ -169,7 +189,11 @@ program::program(engine& engine_ref,
     if (no_optimizations) {
         init_graph();
     } else {
+        // GPU_DEBUG_COUT << "program::program build_program before" << std::endl;
+        // std::this_thread::sleep_for(std::chrono::seconds(5));
         build_program(is_internal);
+        // GPU_DEBUG_COUT << "program::program build_program END" << std::endl;
+        // std::this_thread::sleep_for(std::chrono::seconds(10));
         if (_is_body_program) {
             // To skip empty if (condition) subgraph
             bool can_be_optimized = true;
@@ -490,11 +514,22 @@ void program::set_options() {
 
 void program::build_program(bool is_internal) {
     init_graph();
+    // GPU_DEBUG_COUT << "program::program build_program init_graph" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     _config.finalize(_engine);
     _engine.set_enable_large_allocations(_config.get_enable_large_allocations());
     { pre_optimize_graph(is_internal); }
+    // GPU_DEBUG_COUT << "program::program build_program pre_optimize_graph" << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    GPU_DEBUG_COUT << "program::program build_program run_graph_compilation START:" << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     run_graph_compilation();
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    GPU_DEBUG_COUT << "program::program build_program run_graph_compilation END:" << get_current_working_set_mb() << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     { post_optimize_graph(is_internal); }
+    // GPU_DEBUG_COUT << "program::program build_program post_optimize_graph" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
 
 #ifdef GPU_DEBUG_CONFIG
     if (get_config().get_dry_run_path().empty() || is_internal) {
@@ -529,7 +564,8 @@ void program::run_graph_compilation() { apply_opt_pass<compile_graph>(); }
 
 void program::pre_optimize_graph(bool is_internal) {
     OV_ITT_SCOPED_TASK(ov::intel_gpu::itt::domains::intel_gpu_plugin, "Program::pre_optimize_graph");
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph start : " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     // trim to outputs
     apply_opt_pass<trim_to_outputs>();  // ToDo remove hidden dependencies from trimm pass
 
@@ -544,26 +580,33 @@ void program::pre_optimize_graph(bool is_internal) {
 
     _layout_optimizer = std::make_unique<layout_optimizer>(output_size_handling_enabled);
     set_layout_optimizer_attributes(*_layout_optimizer);
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph 11111" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
     reorder_factory rf;
     if (optimize_data) {
         apply_opt_pass<prepare_primitive_fusing_through>();
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph aa" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(5));
         apply_opt_pass<pre_replace_deconv>();
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph bb" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(5));
         apply_opt_pass<reorder_transfer>();
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph cc" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(5));
         apply_opt_pass<prepare_primitive_fusing>();
-
+    GPU_DEBUG_COUT << "pre_optimize_graph select_preferred_formats before : " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(5));
         apply_opt_pass<select_preferred_formats>();
-
+    GPU_DEBUG_COUT << "pre_optimize_graph select_preferred_formats END: " << get_current_working_set_mb() << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(1));
         apply_opt_pass<reorder_inputs>(rf);
         // Ideally this should be done before fusing to simplify logic and make the pass more powerful,
         // but after format selection to select correct alignment.
         // Unfortunately those passes currently happen in reverse order.
         apply_opt_pass<concat_input_order>();
     }
-
+    // GPU_DEBUG_COUT << "pre_optimize_graph 2222" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(0));
     apply_opt_pass<handle_reshape>();
 
     apply_opt_pass<prepare_padding>(output_size_handling_enabled);
@@ -592,6 +635,8 @@ void program::pre_optimize_graph(bool is_internal) {
 
     // Mark operations that might be skipped at runtime as can_be_optimized.
     apply_opt_pass<mark_runtime_skippable_nodes>();
+    // GPU_DEBUG_COUT << "pre_optimize_graph 3333" << std::endl;
+    // std::this_thread::sleep_for(std::chrono::seconds(5));
 }
 
 void program::post_optimize_graph(bool is_internal) {
