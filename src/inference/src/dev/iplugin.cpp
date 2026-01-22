@@ -94,10 +94,8 @@ std::shared_ptr<ov::ICompiledModel> ov::IPlugin::compile_model(const std::string
     auto core = get_core();
     OPENVINO_ASSERT(core);
     std::cout << "iplugin.cpp core->read_model start: " << get_current_working_set_mb() << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     const auto model = core->read_model(model_path, {}, properties);
     std::cout << "iplugin.cpp core->read_model end: " << get_current_working_set_mb() << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     auto local_properties = properties;
     if (!ov::is_virtual_device(get_device_name())) {
         CoreConfig::remove_core(local_properties);

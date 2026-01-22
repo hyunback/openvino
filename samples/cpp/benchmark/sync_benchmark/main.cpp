@@ -35,7 +35,6 @@ using Ms = std::chrono::duration<double, std::ratio<1, 1000>>;
 long long MY_SLEEP = 0;
 int main(int argc, char* argv[]) {
     std::cout << "app:main.cpp - sync_benchmark_app start main" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     try {
         slog::info << "OpenVINO:" << slog::endl;
         slog::info << ov::get_openvino_version();
@@ -57,23 +56,18 @@ int main(int argc, char* argv[]) {
         // because only one instance of ov::InferRequest is used
         ov::Core core;
         std::cout << "app:main.cpp - create core " << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         ov::CompiledModel compiled_model = core.compile_model(argv[1], device_name, latency);
         std::cout << "app:main.cpp - core.compile_model" << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         ov::InferRequest ireq = compiled_model.create_infer_request();
         std::cout << "app:main.cpp - compiled_model.create_infer_request" << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         // Fill input data for the ireq
         for (const ov::Output<const ov::Node>& model_input : compiled_model.inputs()) {
             fill_tensor_random(ireq.get_tensor(model_input));
         }
         std::cout << "app:main.cpp - fill_tensor_random model_inputs" << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         // Warm up
         ireq.infer();
         std::cout << "app:main.cpp - ireq.infer() warm up" << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
 #if 0
         // Benchmark for seconds_to_run seconds and at least niter iterations
         std::chrono::seconds seconds_to_run{10};
@@ -90,7 +84,6 @@ int main(int argc, char* argv[]) {
             time_point = iter_end;
         }
         std::cout << "app:main.cpp - ireq.infer() END" << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         auto end = time_point;
         double duration = std::chrono::duration_cast<Ms>(end - start).count();
         // Report results

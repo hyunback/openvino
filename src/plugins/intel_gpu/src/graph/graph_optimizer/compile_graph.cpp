@@ -12,23 +12,6 @@
 #include "registry/implementation_manager.hpp"
 #include "registry/registry.hpp"
 
-#ifdef _WIN32
-#include <windows.h>
-#include <psapi.h>
-#endif
-
-// Helper function to get the current Working Set in MB
-static double get_current_working_set_mb() {
-#ifdef _WIN32
-    PROCESS_MEMORY_COUNTERS_EX pmc;
-    if (GetProcessMemoryInfo(GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*)&pmc, sizeof(pmc))) {
-        // WorkingSetSize is in bytes, convert to MB
-        return static_cast<double>(pmc.WorkingSetSize) / (1024.0 * 1024.0);
-    }
-#endif
-    return 0.0;
-}
-
 using namespace cldnn;
 
 void compile_graph::run(program& p) {
@@ -66,7 +49,6 @@ void compile_graph::run(program& p) {
                     } catch (std::exception& e) {
                         fail_reason = e.what();
                     }
-                    // GPU_DEBUG_COUT << "idx: " << idx << ", id: " << node->id() << " : " << get_current_working_set_mb() << std::endl;
 
                     OPENVINO_ASSERT(shape_type == shape_types::dynamic_shape || node->selected_impl != nullptr,
                                     "[GPU] Failed to select implementation for"

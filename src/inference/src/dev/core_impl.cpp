@@ -39,7 +39,6 @@
 #    include "openvino/proxy/plugin.hpp"
 #    include "openvino/proxy/properties.hpp"
 #endif
-long long MY_SLEEP=0;
 
 #ifdef _WIN32
 #include <windows.h>
@@ -723,18 +722,14 @@ ov::Plugin ov::CoreImpl::get_plugin(const std::string& plugin_name) const {
             std::shared_ptr<ov::IPlugin> plugin_impl;
             desc.m_plugin_create_func(plugin_impl);
             std::cout << "core:core_impl.cpp Plugin{plugin_impl, {}} start" << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
             plugin = Plugin{plugin_impl, {}};
             std::cout << "core:core_impl.cpp Plugin{plugin_impl, {}} end" << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         } else {
             so = ov::util::load_shared_object(desc.m_lib_location.c_str());
             std::shared_ptr<ov::IPlugin> plugin_impl;
             std::cout << "core:core_impl.cpp ov::util::get_symbol(so, ov::create_plugin_function))(plugin_impl) start" << std::endl;
-            std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
             reinterpret_cast<ov::CreatePluginFunc*>(ov::util::get_symbol(so, ov::create_plugin_function))(plugin_impl);
             std::cout << "core:core_impl.cpp ov::util::get_symbol(so, ov::create_plugin_function))(plugin_impl) end" << std::endl;      // get plugin done
-            std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
             const auto& plugin_name = plugin_impl->get_device_name();
 
             // Check that device plugin name is the same as requested for HW plugins
@@ -942,16 +937,13 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::compile_model(const std::string& mod
                                                           const ov::AnyMap& config) const {
     OV_ITT_SCOPE(FIRST_INFERENCE, ov::itt::domains::LoadTime, "Core::compile_model::Path");
     std::cout << "core:core_impl.cpp compile_model start" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     auto parsed = parse_device_config(device_name, m_core_config, config, false);
     // in case of compile_model(file_name), we need to clear-up core-level properties
     auto plugin = get_plugin(parsed.m_device_name);
     std::cout << "core:core_impl.cpp get_plugin END" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     const auto& [cache_dir, cache_manager] = parsed.m_core_config.get_cache_config_for_device(plugin);
     auto compiled_model = import_compiled_model(plugin, {}, parsed.m_config, model_path);
     std::cout << "core:core_impl.cpp - import_compiled_model END" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     if (compiled_model) {
         // hint::compiled_blob is set and imported skip compilation
     } else if (cache_manager && device_supports_model_caching(plugin, parsed.m_config) && !is_proxy_device(plugin)) {
@@ -969,10 +961,8 @@ ov::SoPtr<ov::ICompiledModel> ov::CoreImpl::compile_model(const std::string& mod
         });
     } else {
         std::cout << "core:core_impl.cpp - plugin.compile_model start: " << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
         compiled_model = plugin.compile_model(model_path, parsed.m_config);
         std::cout << "core:core_impl.cpp - plugin.compile_model END: " << get_current_working_set_mb() << std::endl;
-        std::this_thread::sleep_for(std::chrono::seconds(MY_SLEEP));
     }
     return compiled_model;
 }

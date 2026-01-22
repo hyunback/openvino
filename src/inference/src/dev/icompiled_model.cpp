@@ -43,7 +43,6 @@ ov::ICompiledModel::ICompiledModel(const std::shared_ptr<const ov::Model>& model
       m_callback_executor(callback_executor) {
     OPENVINO_ASSERT(m_plugin);
     std::cout << "icompiled_model.cpp ov::ICompiledModel::ICompiledModel start" << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(1));
     if (model) {
         // Initialize inputs/outputs
         std::unordered_set<std::string> leaf_names;
