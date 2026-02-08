@@ -126,6 +126,7 @@ KernelsData kernel_selector_base::GetAutoTuneBestKernel(const Params& params, Ke
 
         for (const auto& implementation : allImplementations) {
             // TODO: make sure kernel names are unique.
+            // GPU_DEBUG_COUT << implementation->GetName() << std::endl;
             if (implementation->GetName().compare(cachedkernelName) == 0) {
                 KernelsData kds = implementation->GetTunedKernelsDataByIndex(params, autoTuneIndex);
                 if (kds.size() && kds[0].kernels.size()) {
@@ -168,6 +169,7 @@ KernelList kernel_selector_base::GetAllImplementations(const Params& params, Ker
         ParamsKey requireKey = params.GetParamsKey();
         bool forceImplementation = !params.forceImplementation.empty();
         for (auto& impl : implementations) {
+            // GPU_DEBUG_COUT << "Checking implementation " << impl->GetName() << " for " << params.layerID << std::endl;
             const ParamsKey implKey = impl->GetSupportedKey();
             if (!implKey.Support(requireKey))
                 continue;
@@ -191,7 +193,7 @@ KernelList kernel_selector_base::GetAllImplementations(const Params& params, Ker
     } else {
         GPU_DEBUG_COUT << "No implementation for " << params.layerID << " because of kernel type mismatch" << std::endl;
     }
-
+    // GPU_DEBUG_COUT << "Found " << result.size() << " implementations for " << params.layerID << std::endl;
     return result;
 }
 

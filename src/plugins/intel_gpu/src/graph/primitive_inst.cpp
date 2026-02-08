@@ -2877,16 +2877,26 @@ cldnn::network::ptr primitive_inst::get_unfused_subgraph() {
     }
     return _unfused_subgraph;
 }
-
+#if 1
 #define LOG_AND_RETURN_FALSE(node) do {                                         \
     GPU_DEBUG_TRACE_DETAIL << (node)->id() << " : it is an invalid fusion" << std::endl;  \
     return false;                                                               \
 } while (0)
+#else
+#define LOG_AND_RETURN_FALSE(node) do {                                         \
+    GPU_DEBUG_COUT << (node)->id() << " : it is an invalid fusion" << std::endl;  \
+    return false;                                                               \
+} while (0)
+#endif
 
 bool primitive_inst::is_valid_fusion() const {
     if (!is_dynamic())
         return true;
 
+    // if (get_node().is_type<fully_connected>()) {
+    //     const auto& fuse_descriptors = _impl_params->fused_desc;
+    //     GPU_DEBUG_COUT << get_node().id() << ", : get_selected_impl: " << get_node().get_selected_impl()  << " : fused_desc size = " << fuse_descriptors.size() << std::endl;
+    // }
     const auto& fuse_descriptors = _impl_params->fused_desc;
     if (fuse_descriptors.empty())
         return true;
@@ -2923,12 +2933,19 @@ bool primitive_inst::is_valid_fusion() const {
     }
 
     if (get_node().is_type<fully_connected>() && get_node().get_preferred_impl_type() == impl_types::ocl) {
+        return true;    // just testing
         // TODO: Only fc_bf_tiled_kernel & ref kernel are verified for fused eltwise. To support more fc kernels for eltwise fusion
-        if (!get_node().get_selected_impl())
-            LOG_AND_RETURN_FALSE(_node);
+        // if (!get_node().get_selected_impl())
+        //     LOG_AND_RETURN_FALSE(_node);
+        // if (!data_type_traits::is_i8_u8(get_node().get_input_layout(0).data_type) &&
+        //     (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_bf_tiled") == std::string::npos) &&
+        //     (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_bfyx_ref") == std::string::npos)) {
+        //     LOG_AND_RETURN_FALSE(_node);
+        // }
         if (!data_type_traits::is_i8_u8(get_node().get_input_layout(0).data_type) &&
             (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_bf_tiled") == std::string::npos) &&
-            (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_bfyx_ref") == std::string::npos)) {
+            (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_bfyx_ref") == std::string::npos) &&
+            (get_node().get_selected_impl()->get_kernel_name().find("fully_connected_gpu_sparsity_poc") == std::string::npos)) {
             LOG_AND_RETURN_FALSE(_node);
         }
     }

@@ -26,6 +26,37 @@ struct FullyConnectedImplementationManager : public ImplementationManager {
 
     bool validate_impl(const program_node& node) const override {
         assert(node.is_type<fully_connected>());
+#if 1
+        if (node.id().find("up_proj") != std::string::npos ||
+            node.id().find("gate_proj") != std::string::npos ||
+            node.id().find("down_proj") != std::string::npos) {
+            return false;
+        }
+#else
+        if (node.id().find("__module.model.layers.0.mlp.up_proj") != std::string::npos) {
+            return false;
+        }
+        if (node.id().find("__module.model.layers.0.mlp.gate_proj") != std::string::npos) {
+            return false;
+        }
+        // if (node.id().find("__module.model.layers.21.mlp.down_proj") != std::string::npos) {
+        //     return false;
+        // }
+        // if (node.id().find("__module.model.layers.0.mlp.up_proj") != std::string::npos
+        //     || node.id().find("__module.model.layers.0.mlp.gate_proj") != std::string::npos
+        //     || node.id().find("__module.model.layers.0.mlp.down_proj") != std::string::npos) {
+        //     return false;
+        // }
+        // if (node.id().find("__module.model.layers.0.mlp.up_proj") != std::string::npos
+        //     || node.id().find("__module.model.layers.0.mlp.gate_proj") != std::string::npos) {
+        //     return false;
+        // }
+        // if (node.id().find("__module.model.layers.0.mlp.up_proj") != std::string::npos
+        //     || node.id().find("__module.model.layers.0.mlp.gate_proj") != std::string::npos
+        //     || node.id().find("__module.model.layers.0.mlp.down_proj") != std::string::npos) {
+        //     return false;
+        // }
+#endif
         const auto& config = node.get_program().get_config();
         const auto& info = node.get_program().get_engine().get_device_info();
         if (!info.supports_immad || info.arch == gpu_arch::unknown || !config.get_use_onednn())

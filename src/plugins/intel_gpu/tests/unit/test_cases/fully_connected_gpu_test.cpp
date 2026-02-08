@@ -5787,3 +5787,460 @@ TEST(fully_connected_gpu, cm) {
 
     // Do not validate output for CM
 }
+#if 1
+// Performance test for bf_tile kernel with M=4096, K=4096
+TEST(fully_connected_gpu, my_sparsity_test_f16) {
+    auto& engine = get_test_engine();
+
+    // Test parameters: M=4096, K=4096, N=4096
+    // For fully connected: batch*feature = M, input_y = K, output_y = N
+    // Using batch=1, feature=4096 to get M=4096
+    const int batch_num = 1;
+    const int feature_num = 1;
+    const int input_x = 1;
+    const int input_y = 4096;  // K dimension
+    // const int input_y = 1024;  // K dimension
+    const int output_y = 4096; // N dimension (same as K for this test)
+
+    // Allocate memory
+    auto input_mem = engine.allocate_memory({{batch_num, feature_num, input_y, input_x}, data_types::f16, format::bfyx});
+    auto weights_mem = engine.allocate_memory({{output_y, input_y}, data_types::f16, format::bfyx});
+    // auto input_mem = engine.allocate_memory({{batch_num, feature_num, input_y, input_x}, data_types::f32, format::bfyx});
+    // auto weights_mem = engine.allocate_memory({{output_y, input_y}, data_types::f32, format::bfyx});
+
+    // Generate random input data
+    tests::random_generator rg(GET_SUITE_NAME);
+    // auto input_data = rg.generate_random_4d<float>(batch_num, feature_num, input_y, input_x, -1, 1);
+    // auto input_data = rg.generate_random_4d<ov::float16>(batch_num, feature_num, input_y, input_x, -64, 64); // Considering fp 16 range, it's not good to use large values.
+    auto input_data = rg.generate_random_4d<ov::float16>(batch_num, feature_num, input_y, input_x, -2, 2);
+    // std::vector<std::vector<std::vector<std::vector<ov::float16>>>> input_data(
+    //     batch_num, std::vector<std::vector<std::vector<ov::float16>>>(
+    //         feature_num, std::vector<std::vector<ov::float16>>(input_y, std::vector<ov::float16>(input_x))));
+    // for (auto& b : input_data)
+    //     for (auto& f : b)
+    //         for (auto& y : f)
+    //             for (auto& x : y)
+    //                 x = (ov::float16)1.0f;
+
+    auto weights_data = rg.generate_random_4d<ov::float16>(output_y, input_y, 1, 1, -1, 1);
+    // // // --- Weights Data Pattern Injection ---
+    // // // weights_data shape: [output_y(M), input_y(K), 1, 1]
+    // std::vector<std::vector<std::vector<std::vector<ov::float16>>>> weights_data(
+    //     output_y, std::vector<std::vector<std::vector<ov::float16>>>(
+    //         input_y, std::vector<std::vector<ov::float16>>(1, std::vector<ov::float16>(1))));
+    // for (int m = 0; m < output_y; ++m) {
+    //     for (int k = 0; k < input_y; ++k) {
+    //         float val = (float)((m % 100) * 100 + (k % 100));
+    //         weights_data[m][k][0][0] = (ov::float16)val;
+    //     }
+    // }
+
+    auto input_data_bfyx = flatten_4d(format::bfyx, input_data);
+    auto weights_data_bfyx = flatten_4d(format::bfyx, weights_data);
+    std::vector<ov::float16> empty_bias(output_y, 0);
+    // std::vector<float> empty_bias(output_y, 0);
+
+    set_values(input_mem, input_data_bfyx);
+
+    set_values(weights_mem, weights_data_bfyx);
+
+    // Create topology
+    topology topo_target(
+        input_layout("input", input_mem->get_layout()),
+        data("weights", weights_mem),
+        fully_connected("fc_prim", input_info("input"), "weights", "", 3, 3)
+    );
+
+    // Set configuration to use bf_tiled kernel
+    ExecutionConfig config = get_test_default_config(engine);
+    config.set_property(ov::intel_gpu::optimize_data(true));
+
+    // ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_bf_tiled", impl_types::ocl};
+    ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_sparsity_poc", impl_types::ocl};
+    // ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_bfyx_ref", impl_types::ocl};
+    config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{{"fc_prim", fc_impl_desc}}));
+
+    network net_target(engine, topo_target, config);
+    net_target.set_input_data("input", input_mem);
+#if 0
+    // Warm-up: skip first inference
+    net_target.execute();
+    // net_target.reset_execution(true);
+
+    // Run 50 iterations and measure time
+    const int num_iterations = 50;
+    std::vector<double> execution_times;
+    execution_times.reserve(num_iterations);
+
+    for (int i = 0; i < num_iterations; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+        net_target.execute();
+        net_target.reset_execution(true);
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
+        execution_times.push_back(static_cast<double>(duration_us));
+    }
+
+    // Calculate average time (excluding warm-up which was done separately)
+    double total_time = 0.0;
+    for (const auto& time : execution_times) {
+        total_time += time;
+    }
+    double avg_time_us = total_time / num_iterations;
+
+    std::cout << "\n========================================\n";
+    std::cout << "FC bf_tiled Performance Test Results\n";
+    std::cout << "========================================\n";
+    std::cout << "Configuration: M=" << batch_num * feature_num << ", K=" << input_y << ", N=" << output_y << "\n";
+    std::cout << "Data type: FP16\n";
+    std::cout << "Number of iterations: " << num_iterations << " (after 1 warm-up)\n";
+    std::cout << "Average execution time: " << avg_time_us << " microseconds\n";
+    std::cout << "Average execution time: " << avg_time_us / 1000.0 << " milliseconds\n";
+    std::cout << "========================================\n\n";
+
+    // Validate output dimensions
+    auto outputs = net_target.execute();
+    auto output_mem = outputs.at("fc_prim").get_memory();
+    ASSERT_EQ(output_mem->count(), batch_num * feature_num * output_y);
+#endif
+
+#if 1
+// ---- [ACC] Accuracy check against reference kernel ----
+    topology topo_ref(
+        input_layout("input", input_mem->get_layout()),
+        data("weights", weights_mem),
+        fully_connected("fc_prim", input_info("input"), "weights", "", 3, 3)
+    );
+
+    ExecutionConfig cfg_ref = get_test_default_config(engine);
+    cfg_ref.set_property(ov::intel_gpu::optimize_data(false));
+    ov::intel_gpu::ImplementationDesc fc_impl_ref = {format::bfyx, "fully_connected_gpu_bfyx_ref", impl_types::ocl};
+    cfg_ref.set_property(ov::intel_gpu::force_implementations(
+        ov::intel_gpu::ImplForcingMap{{"fc_prim", fc_impl_ref}}
+    ));
+
+    network net_ref(engine, topo_ref, cfg_ref);
+    net_ref.set_input_data("input", input_mem);
+
+    // Run both once for accuracy tensors
+    auto outs_target = net_target.execute();
+    auto mem_target  = outs_target.at("fc_prim").get_memory();
+
+    auto outs_ref   = net_ref.execute();
+    auto mem_ref    = outs_ref.at("fc_prim").get_memory();
+
+    // ---- [ACC] Read back & compare ----
+    // helper: read buffer to vector<ov::float16>
+    auto read_tensor_f16 = [](const memory::ptr& mem) {
+        std::vector<ov::float16> v(mem->count());
+        mem_lock<ov::float16> lock{mem, get_test_stream()};
+        std::copy(lock.begin(), lock.end(), v.begin());
+        return v;
+    };
+
+    auto tgt = read_tensor_f16(mem_target);
+    auto ref = read_tensor_f16(mem_ref);
+
+    ASSERT_EQ(tgt.size(), ref.size());
+
+    // 에러 통계
+    double max_abs_diff = 0.0;
+    double mean_abs_diff = 0.0;
+    double max_rel_err = 0.0;
+
+    for (size_t i = 0; i < tgt.size(); ++i) {
+        const double a = static_cast<double>(tgt[i]);
+        const double b = static_cast<double>(ref[i]);
+        if (i < 10)
+            std::cout << "tgt[" << i << "]=" << a << ", ref[" << i << "]=" << b << "\n";
+        const double abs_diff = std::abs(a - b);
+        const double denom = std::max(1e-6, std::abs(b)); // guard
+        const double rel_err = abs_diff / denom;
+
+        max_abs_diff = std::max(max_abs_diff, abs_diff);
+        max_rel_err  = std::max(max_rel_err,  rel_err);
+        mean_abs_diff += abs_diff;
+    }
+    mean_abs_diff /= static_cast<double>(tgt.size());
+
+    const double atol = 3e-2;
+    const double rtol = 1e-2;
+
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "[ACC] FP16 compare vs ref:\n";
+    std::cout << "      max_abs_diff = " << max_abs_diff << "\n";
+    std::cout << "      mean_abs_diff= " << mean_abs_diff << "\n";
+    std::cout << "      max_rel_err  = " << max_rel_err  << "\n";
+
+    ASSERT_LE(max_abs_diff, atol) << "Max abs diff exceeded";
+    ASSERT_LE(max_rel_err,  rtol) << "Max rel err exceeded";
+#endif
+}
+
+TEST(fully_connected_gpu, my_sparsity_test_int8) {
+auto& engine = get_test_engine();
+    tests::random_generator rg(GET_SUITE_NAME);
+
+    const int batch_num = 1;
+    const int feature_num = 1;
+    const int input_x = 1;
+    const int input_y = 4096;  // K
+    const int output_y = 4096; // M
+
+    auto input_mem = engine.allocate_memory({{batch_num, feature_num, input_y, input_x}, data_types::f16, format::bfyx});
+    auto weights_mem = engine.allocate_memory({{output_y, input_y}, data_types::i8, format::bfyx});
+    auto scale_mem = engine.allocate_memory({{1, output_y}, data_types::f16, format::bfyx});
+    auto zp_mem = engine.allocate_memory({{1, output_y}, data_types::f16, format::bfyx});
+    auto bias_mem = engine.allocate_memory({{1, output_y}, data_types::f16, format::bfyx});
+
+#if 1
+    // auto input_data = rg.generate_random_4d<ov::float16>(batch_num, feature_num, input_y, input_x, -1, 1);
+    auto input_data = rg.generate_random_4d<ov::float16>(batch_num, feature_num, input_y, input_x, -2, 2);
+    // std::vector<ov::float16> input_data(input_y, ov::float16(1.0f));
+    // set_values(input_mem, input_data);
+
+    // // 2. Sparsity setting (ex: 0.3 is 30%)
+    // float sparsity_ratio = 0.0f;
+    // // 3. Iterate nested loops and probabilistically inject 0
+    // // (Shuffling indices of nested vectors is complex, so implementing probabilistically helps prevent errors)
+    // std::random_device rd;
+    // std::mt19937 gen(rd());
+    // std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+    // for (auto& b : input_data) {           // Batch
+    //     for (auto& f : b) {                // Feature
+    //         for (auto& y : f) {            // Y
+    //             for (auto& x : y) {        // X
+    //                 if (dist(gen) < sparsity_ratio) {
+    //                     x = static_cast<ov::float16>(0.0f);
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
+
+    set_values(input_mem, flatten_4d(format::bfyx, input_data));
+
+    // weight
+    auto weights_data = rg.generate_random_4d<int8_t>(output_y, input_y, 1, 1, -127, 127);
+    set_values(weights_mem, flatten_4d(format::bfyx, weights_data));
+    // std::vector<int8_t> weights_data(output_y * input_y, 1);     // all 1
+    // set_values(weights_mem, weights_data);
+
+    // zp
+    auto zp_data = rg.generate_random_4d<ov::float16>(1, output_y, 1, 1, -1.0, 1.0);
+    set_values(zp_mem, flatten_4d(format::bfyx, zp_data));
+
+    // scale
+    // original
+    auto scale_data = rg.generate_random_4d<ov::float16>(1, output_y, 1, 1, -4.0f, 4.0f);
+    set_values(scale_mem, flatten_4d(format::bfyx, scale_data));
+
+    // // Fixed scale 1
+    // std::vector<ov::float16> debug_scale(output_y, ov::float16(1.0f)); // Scale 1
+    // set_values(scale_mem, debug_scale);
+
+    // // Fixed scale pattern (for debug)
+    // std::vector<ov::float16> scale_data(output_y);
+    // for (int m = 0; m < output_y; ++m) {
+    //     if (m == 0)
+    //         scale_data[m] = static_cast<ov::float16>(2.0f);
+    //     else
+    //         scale_data[m] = static_cast<ov::float16>(1.f); 
+    // }
+    // set_values(scale_mem, scale_data);
+
+    // bias
+    auto bias_data = rg.generate_random_4d<ov::float16>(1, output_y, 1, 1, -2.0f, 2.0f);
+    set_values(bias_mem, flatten_4d(format::bfyx, bias_data));
+
+#else   // for debugging (with fixed values 1)
+    std::vector<int8_t> debug_weights(output_y * input_y, 1); // all 1
+    std::vector<ov::float16> debug_input(input_y, ov::float16(1.0f)); // all 1
+    std::vector<ov::float16> debug_scale(output_y, ov::float16(1.0f)); // Scale 1
+    std::vector<ov::float16> debug_zp(output_y, ov::float16(0.0f)); // ZP 0
+
+    set_values(input_mem, debug_input);
+    set_values(weights_mem, debug_weights);
+    set_values(scale_mem, debug_scale);
+    set_values(zp_mem, debug_zp);
+#endif
+    // 3. Target Topology (My Sparsity Kernel)
+    topology topo_target(
+        input_layout("input", input_mem->get_layout()),
+        data("weights", weights_mem),
+        data("scales", scale_mem),
+        data("zps", zp_mem),
+        data("bias", bias_mem),
+        fully_connected("fc_prim", input_info("input"), "weights", "bias", "scales", "zps", data_types::f16, 3, 3)
+        // fully_connected("fc_prim", input_info("input"), "weights", "", "scales", "", data_types::f16, 3, 3)
+    );
+    // auto fc_prim = fully_connected("fc_prim", input_info("input"), "weights", "", "scale", dcomp_zp_name, data_types::f16);
+
+    ExecutionConfig config = get_test_default_config(engine);
+    config.set_property(ov::intel_gpu::optimize_data(true));
+    ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_sparsity_poc", impl_types::ocl};
+    // ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_bf_tiled", impl_types::ocl};
+    // ov::intel_gpu::ImplementationDesc fc_impl_desc = {format::bfyx, "fully_connected_gpu_bfyx_ref", impl_types::ocl};
+    config.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{{"fc_prim", fc_impl_desc}}));
+
+    network net_target(engine, topo_target, config);
+    net_target.set_input_data("input", input_mem);
+
+#if 0       // performance
+    // 1. Warm-up: 20 iterations
+    const int num_warmup = 20;
+    for (int i = 0; i < num_warmup; ++i) {
+        net_target.execute();
+        net_target.reset_execution(true);
+    }
+
+    // 2. Main Measurement: 100 iterations
+    const int num_iterations = 100;
+    std::vector<double> execution_times;
+    execution_times.reserve(num_iterations);
+
+    for (int i = 0; i < num_iterations; ++i) {
+        auto start = std::chrono::high_resolution_clock::now();
+
+        net_target.execute();
+        net_target.reset_execution(true);
+
+        auto stop = std::chrono::high_resolution_clock::now();
+
+        auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
+        execution_times.push_back(static_cast<double>(duration_us));
+    }
+
+    // 3. Calculate Median & Average
+    std::sort(execution_times.begin(), execution_times.end());
+
+    double median_time_us;
+    if (num_iterations % 2 == 0) {
+        median_time_us = (execution_times[num_iterations / 2 - 1] + execution_times[num_iterations / 2]) / 2.0;
+    } else {
+        median_time_us = execution_times[num_iterations / 2];
+    }
+
+    double total_time = 0.0;
+    for (const auto& time : execution_times) {
+        total_time += time;
+    }
+    double avg_time_us = total_time / num_iterations;
+
+    // 4. Print Results
+    std::cout << "\n========================================\n";
+    std::cout << "Performance Test Results (Sparsity POC)\n";
+    std::cout << "========================================\n";
+    std::cout << "Configuration: M=" << batch_num * feature_num << ", K=" << input_y << ", N=" << output_y << "\n";
+    std::cout << "Number of Warm-up: " << num_warmup << "\n";
+    std::cout << "Number of Iterations: " << num_iterations << "\n";
+    std::cout << "----------------------------------------\n";
+    std::cout << "Average: " << avg_time_us << " us (" << avg_time_us / 1000.0 << " ms)\n";
+    std::cout << "Median : " << median_time_us << " us (" << median_time_us / 1000.0 << " ms)\n";
+    std::cout << "Min    : " << execution_times.front() << " us\n";
+    std::cout << "Max    : " << execution_times.back() << " us\n";
+    std::cout << "========================================\n\n";
+
+    // Validate output dimensions
+    auto outputs = net_target.execute();
+    auto output_mem = outputs.at("fc_prim").get_memory();
+    ASSERT_EQ(output_mem->count(), batch_num * feature_num * output_y);
+#endif
+
+#if 1    // acc
+    auto read_tensor_f16 = [](const memory::ptr& mem) {
+        std::vector<ov::float16> v(mem->count());
+        mem_lock<ov::float16> lock{mem, get_test_stream()};
+        std::copy(lock.begin(), lock.end(), v.begin());
+        return v;
+    };
+
+    // target
+    auto outs_target = net_target.execute();
+    auto mem_target = outs_target.at("fc_prim").get_memory();
+    auto tgt = read_tensor_f16(mem_target);
+#if 0
+    // reference for gpu fc other kernel. -> Not sure but, Something issue
+    topology topo_ref(
+        input_layout("input", input_mem->get_layout()),
+        data("weights", weights_mem),
+        data("scales", scale_mem),
+        data("zps", zp_mem),
+        // fully_connected("fc_prim", input_info("input"), "weights", "", "scales", "zps", data_types::f16, 3, 3)
+        fully_connected("fc_prim", input_info("input"), "weights", "", "scales", "", data_types::f16, 3, 3)
+    );
+
+    ExecutionConfig cfg_ref = get_test_default_config(engine);
+    cfg_ref.set_property(ov::intel_gpu::optimize_data(true));
+    // ov::intel_gpu::ImplementationDesc fc_impl_ref = {format::bfyx, "fully_connected_gpu_bf_tiled", impl_types::ocl};
+    ov::intel_gpu::ImplementationDesc fc_impl_ref = {format::bfyx, "fully_connected_gpu_bfyx_ref", impl_types::ocl};
+    cfg_ref.set_property(ov::intel_gpu::force_implementations(ov::intel_gpu::ImplForcingMap{{"fc_prim", fc_impl_ref}}));
+
+    network net_ref(engine, topo_ref, cfg_ref);
+    net_ref.set_input_data("input", input_mem);
+
+    auto outs_ref = net_ref.execute();
+    auto mem_ref = outs_ref.at("fc_prim").get_memory();
+    auto ref = read_tensor_f16(mem_ref);
+    ASSERT_EQ(tgt.size(), ref.size());
+#else   // CPU
+    std::vector<float> cpu_ref(output_y, 0.0f);
+    auto flatten_input_data = flatten_4d(format::bfyx, input_data);
+    auto flatten_weights_data = flatten_4d(format::bfyx, weights_data);
+    auto flatten_scale_data = flatten_4d(format::bfyx, scale_data);
+    auto flatten_zp_data = flatten_4d(format::bfyx, zp_data);
+    auto flatten_bias_data = flatten_4d(format::bfyx, bias_data);
+
+    for (int m = 0; m < output_y; ++m) {
+        float sum = 0.0f;
+        float current_scale = (float)flatten_scale_data[m];
+        float current_zp = (float)flatten_zp_data[m];
+        float current_bias = (float)flatten_bias_data[m];
+
+        for (int k = 0; k < input_y; ++k) {
+            float in_val = (float)flatten_input_data[k];
+            float wei_val = (float)flatten_weights_data[m * input_y + k];
+            // Decompression: (Weight - ZP) * Scale
+            float decompressed_wei = (wei_val - current_zp) * current_scale;
+            sum += in_val * decompressed_wei;
+        }
+        cpu_ref[m] = sum + current_bias;
+    }
+
+#endif
+    double max_abs_diff = 0.0;
+    double mean_abs_diff = 0.0;
+    double max_rel_err = 0.0;
+
+    for (size_t i = 0; i < tgt.size(); ++i) {
+        const double a = static_cast<double>(tgt[i]);
+        // const double b = static_cast<double>(ref[i]);
+        const double b = static_cast<double>(cpu_ref[i]);
+        if (i < 10)
+            std::cout << "tgt[" << i << "]=" << a << ", ref[" << i << "]=" << b << "\n";
+        const double abs_diff = std::abs(a - b);
+        const double denom = std::max(1e-6, std::abs(b)); // guard
+        const double rel_err = abs_diff / denom;
+
+        max_abs_diff = std::max(max_abs_diff, abs_diff);
+        max_rel_err  = std::max(max_rel_err,  rel_err);
+        mean_abs_diff += abs_diff;
+    }
+    mean_abs_diff /= static_cast<double>(tgt.size());
+
+    const double atol = 5;
+    const double rtol = 1;
+
+    std::cout << std::fixed << std::setprecision(6);
+    std::cout << "[ACC] FP16 compare vs ref:\n";
+    std::cout << "      max_abs_diff = " << max_abs_diff << "\n";
+    std::cout << "      mean_abs_diff= " << mean_abs_diff << "\n";
+    std::cout << "      max_rel_err  = " << max_rel_err  << "\n";
+
+    ASSERT_LE(max_abs_diff, atol) << "Max abs diff exceeded";
+    ASSERT_LE(max_rel_err,  rtol) << "Max rel err exceeded";
+#endif
+}
+#endif

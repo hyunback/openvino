@@ -21,6 +21,7 @@
 #include "fully_connected_kernel_fs_byx_fsv32.h"
 #include "fully_connected_kernel_bf_tiled.h"
 #include "fully_connected_kernel_gemv.h"
+#include "fully_connected_kernel_sparsity.h"
 
 namespace kernel_selector {
 
@@ -43,6 +44,7 @@ fully_connected_kernel_selector::fully_connected_kernel_selector() {
     Attach<FullyConnected_fs_byx_fsv32>();
     Attach<FullyConnected_bf_tiled>();
     Attach<FullyConnected_GEMV>();
+    Attach<FullyConnected_sparsity>();
 }
 
 KernelsData fully_connected_kernel_selector::GetBestKernels(const Params& params) const {
