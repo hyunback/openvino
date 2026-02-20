@@ -34,8 +34,6 @@ KERNEL(fc)(
     if (m_base >= M) return;
 
     float16 local_acc = 0.0f;
-    // float ds_debug[16];
-    // float ds_safe[16];
 
     // --- Decompression Parameters Loading ---
 #if COMPRESSED_WEIGHTS
@@ -142,7 +140,7 @@ KERNEL(fc)(
             // local_acc += in_val * raw_weight_vec;
 
 
-            // // Trial3. Block Read + Unpacking 시도 -> ACC failed
+            // // Trial3. Block Read + Unpacking -> ACC failed
             // float in_val = (float)input[k];
             // // if (in_val == 0.0f) continue;
             // long weight_offset = (long)k * (long)FILTER_IFM_PITCH + (long)m_base;

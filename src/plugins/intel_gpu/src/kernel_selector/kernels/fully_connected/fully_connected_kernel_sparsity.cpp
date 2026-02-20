@@ -49,26 +49,22 @@ FullyConnected_sparsity::DispatchData FullyConnected_sparsity::SetDefault(const 
     dispatchData.gws = { total_m, total_b, 1 };
     dispatchData.lws = { 16, 1, 1 };
 
-    // GPU_DEBUG_COUT << "gws: " << dispatchData.gws[0] << "," << dispatchData.gws[1] << "," << dispatchData.gws[2] << std::endl;
-    // GPU_DEBUG_COUT << "lws: " << dispatchData.lws[0] << "," << dispatchData.lws[1] << "," << dispatchData.lws[2] << std::endl;
+    // GPU_DEBUG_INFO << "gws: " << dispatchData.gws[0] << "," << dispatchData.gws[1] << "," << dispatchData.gws[2] << std::endl;
+    // GPU_DEBUG_INFO << "lws: " << dispatchData.lws[0] << "," << dispatchData.lws[1] << "," << dispatchData.lws[2] << std::endl;
 
     return dispatchData;
 }
 
 KernelsPriority FullyConnected_sparsity::GetKernelsPriority(const Params& params) const {
-    // return DONT_USE_IF_HAVE_SOMETHING_ELSE;
-    // return FORCE_PRIORITY_1;    // Top priority in sparsity
-    // bool is_target_mlp = false;
-    // if (params.layerID.find("up_proj") != std::string::npos ||
-    //     params.layerID.find("gate_proj") != std::string::npos ||
-    //     params.layerID.find("down_proj") != std::string::npos) {
-    //     is_target_mlp = true;
-    // }
-    // if (params.layerID.find("__module.model.layers.0.mlp.up_proj") != std::string::npos) {
-    //     is_target_mlp = true;
-    // }
-    // no way to know actual batch size in this time..
-    // return is_target_mlp ? FORCE_PRIORITY_1 : DONT_USE_IF_HAVE_SOMETHING_ELSE;
+    const auto& fc_params = static_cast<const fully_connected_params&>(params);
+    // skip llama-3.1-8b-instruct down_proj
+    if (fc_params.inputs[0].Y().v < 2048 || fc_params.outputs[0].Y().v < 2048)
+        return FORCE_PRIORITY_7;
+    if (fc_params.inputs[0].Y().v >= 8192)
+        return FORCE_PRIORITY_7;
+    if (fc_params.inputs[0].Y().v > fc_params.outputs[0].Y().v)
+        return FORCE_PRIORITY_6;    // IFM > OFM bad performance
+
     return FORCE_PRIORITY_1;
 }
 
@@ -125,18 +121,7 @@ bool FullyConnected_sparsity::Validate(const Params& params) const {
         DO_NOT_USE_THIS_KERNEL(params.layerID);
     // int8 validation
     const auto& fc_params = static_cast<const fully_connected_params&>(params);
-    // if (params.layerID.find("__module.model.layers.0.mlp.up_proj") != std::string::npos) {
-    //     GPU_DEBUG_COUT << params.layerID << " " << fc_params.outputs[0].GetLayout() << " "
-    //                     << fc_params.outputs[0].Batch().v << " " << fc_params.outputs[0].Feature().v << " "
-    //                     << fc_params.outputs[0].Y().v << " " << fc_params.outputs[0].X().v << std::endl;
-    // }
-    // if (params.layerID.find("__module.model.layers.0.mlp.gate_proj") != std::string::npos) {
-    //     GPU_DEBUG_COUT << params.layerID << " " << fc_params.outputs[0].GetLayout() << " "
-    //                     << fc_params.outputs[0].Batch().v << " " << fc_params.outputs[0].Feature().v << " "
-    //                     << fc_params.outputs[0].Y().v << " " << fc_params.outputs[0].X().v << std::endl;
-    // }
 
-    // We don't support 4d output
     if (fc_params.outputs[0].GetLayout() == DataLayout::bfyx && fc_params.outputs[0].X().v > 1)
         DO_NOT_USE_THIS_KERNEL(params.layerID);
 
