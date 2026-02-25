@@ -144,6 +144,17 @@ inline void (FUNC_NAME)(
         CONST_LOOP(FORCED_TILE_B, LOAD_IN_0);
         #undef LOAD_IN_0
         input_offset += TILE_IFM * SIMD - TILE_IN_B_PITCH * FORCED_TILE_B;
+
+        bool has_data = (((INPUT0_TYPE*)in_0)[0] != (INPUT0_TYPE)0);
+        uint ki_iterations = (TILE_IFM * SIMD) / TILE_K;
+        const uint total_weight_ni_step = ki_iterations * (TILE_K_OFM_PACKED * TILE_OFM_PER_OSV_SIZE * SIMD);
+        static uint my_count = 0;
+        if (!sub_group_any(has_data)) {
+            weights_offset += total_weight_ni_step;
+            // printf("%u, %u\n", my_count++, ni);
+            continue;
+        }
+
         // NOTE: Manually unrolling multiplication loop leads to lower register pressure and allows for bigger block sizes,
         //       but significantly degrades readability and generality of code.
         //       It doesn't also show noticable performance improvement on tested configurations.

@@ -37,6 +37,13 @@ KERNEL(fc)(
         for (uint x = 0; x < INPUT0_SIZE_X; ++x)
         {
             const uint input0_idx = INPUT0_GET_INDEX(b, ofm, y, x);
+            // // [SIMPLEST OPTIMIZATION START]
+            // // Skip the entire calculation if the input value is zero.
+            // if ((ACCUMULATOR_TYPE)(input[input0_idx]) == ACCUMULATOR_VAL_ZERO)
+            // {
+            //     continue;
+            // }
+            // // [SIMPLEST OPTIMIZATION END]
             #if COMPRESSED_WEIGHTS
                 #if DECOMPRESSION_ZP_TERM
                     #if DECOMPRESSION_ZP_SCALAR

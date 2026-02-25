@@ -15,7 +15,7 @@ static constexpr size_t input_load_size = 4;
 static constexpr size_t min_quantize_grp_size = (simd * 2); // SIMD * (min value of tile_ifm)
 static constexpr size_t min_slm_size = 256;
 static std::vector<size_t> available_quantize_grp_size = {128, 64, 32};
-
+// #define MY_DYN_SPARSITY_GATHER
 namespace kernel_selector {
 
 namespace fc_kernel_bf_tiled_utils {
@@ -41,6 +41,10 @@ std::pair<size_t, size_t> get_output_aligned_bf_size(const fully_connected_param
                                                      bool needs_align,
                                                      uint32_t align_b,
                                                      int32_t align_f) {
+    // GPU_DEBUG_COUT << params.inputs[0].Batch().v << ", " << params.inputs[0].Feature().v << ", "
+    //                 << params.inputs[0].Y().v << ", " << params.inputs[0].X().v << std::endl;
+    // GPU_DEBUG_COUT << params.outputs[0].Batch().v << ", " << params.outputs[0].Feature().v << ", "
+    //                 << params.outputs[0].Y().v << ", " << params.outputs[0].X().v << std::endl;
     size_t output_f =
         (needs_align == true) ? CeilDiv(params.outputs[0].Feature().v, align_f) : params.outputs[0].Feature().v;
     size_t output_b = params.outputs[0].Batch().v;
@@ -606,6 +610,8 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
 
     auto batch_threads = threads.first;
     auto feature_threads = threads.second;
+    GPU_DEBUG_INFO << batch_threads<< ", " << feature_threads << " : "
+                    << tparams.tile_b << ", " << tparams.tile_ofm << ", " << tparams.tile_ifm << tparams.tile_k << ", " << tparams.outer_ofm << std::endl;
 
     const size_t aligned_batch = Align(batch_threads, lws_batches); // Each WG calculates 8x8 batches (TILE_B x LWS[2] size)
     const bool can_use_slm = tparams.kernel_type == KernelType::SLM;
@@ -621,8 +627,10 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
 
     dispatchData.tile_m = tparams.tile_b;
     dispatchData.tile_n = tparams.tile_ofm;
+    // dispatchData.tile_n = 2;
     dispatchData.tile_mk = tparams.tile_ifm;
     dispatchData.tile_nk = tparams.tile_k;
+    // dispatchData.tile_nk = 1;
     dispatchData.outer_n = tparams.outer_ofm;
     dispatchData.tile_ms = tparams.dispatch_bsv;
     dispatchData.tile_ns = tparams.dispatch_fsv;
@@ -633,6 +641,12 @@ FullyConnected_bf_tiled::SetDefault(const fully_connected_params& params, int au
 
 KernelsPriority FullyConnected_bf_tiled::GetKernelsPriority(const Params& params) const {
     const auto& fc_params = static_cast<const fully_connected_params&>(params);
+    // // my test
+    // if (params.layerID.find("up_proj") != std::string::npos ||
+    //     params.layerID.find("gate_proj") != std::string::npos ||
+    //     params.layerID.find("down_proj") != std::string::npos) {
+    //     return TUTORIAL_PRIORITY;
+    // }
 
     size_t output_b = get_output_aligned_bf_size(fc_params, false).first;
 
@@ -765,12 +779,28 @@ JitConstants FullyConnected_bf_tiled::GetJitConstants(const fully_connected_para
     jit.AddConstant(MakeJitConstant("TILE_OFM", dispatchData.tile_n));
     jit.AddConstant(MakeJitConstant("TILE_IFM", dispatchData.tile_mk));
     jit.AddConstant(MakeJitConstant("TILE_K", dispatchData.tile_nk));
+    GPU_DEBUG_INFO << "TILE_K: " << dispatchData.tile_nk << std::endl;
     jit.AddConstant(MakeJitConstant("TILE_K_OFM", tile_k_ofm));
     jit.AddConstant(MakeJitConstant("TILE_K_OFM_PACKED", tile_k_ofm_packed));
     jit.AddConstant(MakeJitConstant("OUTER_OFM", dispatchData.outer_n));
     jit.AddConstant(MakeJitConstant("DISPATCH_BSV", dispatchData.tile_ms));
     jit.AddConstant(MakeJitConstant("DISPATCH_FSV", dispatchData.tile_ns));
     jit.AddConstant(MakeJitConstant("TILE_IFM_ELEMENTS_SIZE", (dispatchData.tile_mk * simd)));
+
+#if 1
+    bool is_target_ds = false;
+    if (params.layerID.find("up_proj") != std::string::npos ||
+        params.layerID.find("gate_proj") != std::string::npos ||
+        params.layerID.find("down_proj") != std::string::npos) {
+        is_target_ds = true;
+    }
+    if (is_target_ds && dispatchData.tile_m == 1) {
+        jit.AddConstant(MakeJitConstant("MY_DYN_SPARSITY", 1));
+#ifdef MY_DYN_SPARSITY_GATHER
+        jit.AddConstant(MakeJitConstant("MY_DYN_SPARSITY_GATHER", 1));
+#endif
+    }
+#endif
 
     if (quantize_grp_size / (dispatchData.tile_mk * simd) > 1 && quantize_grp_size % (dispatchData.tile_mk * simd) == 0) {
         jit.AddConstant(MakeJitConstant("NUM_LOOP_IN_DYN_QUAN_GROUP", quantize_grp_size / (dispatchData.tile_mk * simd)));
@@ -871,7 +901,9 @@ void FullyConnected_bf_tiled::GetUpdateDispatchDataFunc(KernelData& kd) const {
             if (skip_kernel_idx >= 0)
                 kd.kernels[skip_kernel_idx].skip_execution = true;
 
-            GPU_DEBUG_TRACE_DETAIL << "FC bf tiled: " << (execute_type == KernelType::SLM ? "SLM" : "Default") << " shape-agnostic kernel version "
+            // GPU_DEBUG_TRACE_DETAIL << "FC bf tiled: " << (execute_type == KernelType::SLM ? "SLM" : "Default") << " shape-agnostic kernel version "
+            //                         << "will be used for batch size = " << output_batch << "\n";
+            GPU_DEBUG_INFO << prim_params.layerID << " : " << (execute_type == KernelType::SLM ? "SLM" : "Default") << " shape-agnostic kernel version "
                                     << "will be used for batch size = " << output_batch << "\n";
 
             auto dispatchData = SetDefault(prim_params, -1, static_cast<int>(execute_type));
@@ -910,6 +942,16 @@ void FullyConnected_bf_tiled::GetUpdateDispatchDataFunc(KernelData& kd) const {
                     kd.kernels[0].params.workGroups.local = {1, 1, 1};
                 }
             }
+            // GPU_DEBUG_COUT << params.layerID << " : " << "execute_kernel_idx: " << execute_kernel_idx << ", skip_execution: " << skip_execution
+            for (size_t i = 0; i < kd.kernels.size(); ++i) {
+                auto gws = kd.kernels[execute_kernel_idx].params.workGroups.global;
+                auto lws = kd.kernels[execute_kernel_idx].params.workGroups.local;
+                GPU_DEBUG_INFO << i << " : " << " [" << dispatchData.gws[0] << ", " << dispatchData.gws[1] << ", " << dispatchData.gws[2] << "], "
+                                                << "[" << dispatchData.lws[0] << ", " << dispatchData.lws[1] << ", " << dispatchData.lws[2] << "]"
+                                                << ", " << kd.kernels[execute_kernel_idx].skip_execution << std::endl;
+            }
+            GPU_DEBUG_INFO << dispatchData.use_slm << ", " << dispatchData.tile_m << ", " << dispatchData.tile_n
+                            << ", " << dispatchData.tile_mk << ", " << dispatchData.tile_nk << std::endl;
         };
     }
 }
@@ -1074,7 +1116,18 @@ KernelsData FullyConnected_bf_tiled::GetMultiKernelsData(const Params &params,
     // Generate dispatch data for KernelType::DEFAULT
     int kernel_number = 0;
     const DispatchData dispatchData = SetDefault(new_params, autoTuneIndex, kernel_number);
-
+#ifdef MY_DYN_SPARSITY_GATHER
+    // my sparsity test
+    bool is_target_ds = false;
+    if (params.layerID.find("up_proj") != std::string::npos ||
+        params.layerID.find("gate_proj") != std::string::npos ||
+        params.layerID.find("down_proj") != std::string::npos) {
+        is_target_ds = true;
+    }
+    if (is_target_ds && dispatchData.tile_m == 1) {
+        inputs_count += 3;
+    }
+#endif
     // Dynamic-quantize kernel
     {
         auto& quan_kernel = kd.kernels[0];

@@ -452,12 +452,16 @@ NodeDebugHelper::NodeDebugHelper(const primitive_inst& inst)
     // Dump input buffers of 'inst'
     if (config.get_dump_tensors_path().length() > 0) {
         const std::string& layer_name = inst.id();
-
-        if (is_target_iteration(m_iter, config.get_dump_iterations()) &&
+        // test for dynamic sparsity dump
+        bool is_first_inf = false;
+        if (m_iter == 0) is_first_inf = true;
+        if (is_target_iteration(m_iter, config.get_dump_iterations()) && !is_first_inf &&
             config.get_dump_tensors() != ov::intel_gpu::DumpTensors::out && is_layer_for_dumping(config, layer_name)) {
             m_stream.finish(); // Wait for stream completion before dumping input buffers
             std::string debug_str_for_bin_load = " Command for loading : OV_LOAD_DUMP_RAW_BINARY=\"" + layer_name + ":";
             for (size_t i = 0; i < m_inst.dependencies().size(); i++) {
+                // test for dynamic sparsity dump
+                if (i !=0) continue;
                 std::string name = get_file_prefix() + "_src" + std::to_string(i);
                 auto input_mem = m_inst.dep_memory_ptr(i);
                 if (input_mem == nullptr) {

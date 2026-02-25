@@ -1,11 +1,15 @@
 // Copyright (C) 2018-2025 Intel Corporation
 // SPDX-License-Identifier: Apache-2.0
 //
+#pragma OPENCL EXTENSION cl_khr_subgroups : enable
+#pragma OPENCL EXTENSION cl_intel_subgroups : enable
 
 #include "include/batch_headers/common.cl"
 #include "include/batch_headers/sub_group_block_read.cl"
 #include "include/batch_headers/sub_group_block_write.cl"
 #include "include/batch_headers/sub_group_shuffle.cl"
+
+#define EPSILON_VAL 0.1h
 
 // JIT Parameters:
 // SIMD         - sub-group size/simd width, one of {8, 16};
@@ -192,6 +196,11 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #if USE_SLM
     , __local ACCUMULATOR_TYPE* wei_local_mem
 #endif
+#if MY_DYN_SPARSITY_GATHER
+    , __local uint* nz_indices
+    , __local INPUT0_TYPE* nz_values
+    , __local uint* nz_count_ptr
+#endif
 #if BIAS_TERM
     , const __global BIAS_TYPE* biases
 #endif
@@ -199,6 +208,91 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
     , FUSED_OPS_DECLS
 #endif
 ) {
+#ifdef MY_DYN_SPARSITY_GATHER
+#if 0
+    const uint sglid = get_sub_group_local_id();
+    const uint out_f = (get_group_id(0) * SIMD);
+    const uint out_b = 0;
+
+    ACCUMULATOR_TYPE activated[TILE_OFM]; 
+    unroll_for(uint i = 0; i < TILE_OFM; i++) {
+        activated[i] = (ACCUMULATOR_TYPE)0;
+    }
+
+    const uint weight_ofm_base = (out_f / SIMD) * INPUT0_ELEMENTS_COUNT * SIMD;
+    const uint iterations = INPUT0_ELEMENTS_COUNT / (TILE_IFM * SIMD);  // 4096 / (1*16) => 256
+
+    // ========================================================================
+    // Main Computation Loop
+    // ========================================================================
+    for (uint ni = 0; ni < iterations; ++ni) {
+        // Phase 0: Input Load
+        INPUT0_TYPE val = input[ni * SIMD + sglid];
+
+        if (sglid == 0) *nz_count_ptr = 0;
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        if (val != (INPUT0_TYPE)0) {
+            uint slot = atomic_inc(nz_count_ptr);
+            nz_indices[slot] = ni * SIMD + sglid;
+            nz_values[slot] = val;
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+
+        // Phase 2: Sparse Gather Loop
+        uint total_nz = *nz_count_ptr;
+        for (uint nz_ptr = 0; nz_ptr < total_nz; ++nz_ptr) {
+            uint k_idx = nz_indices[nz_ptr];
+            INPUT0_TYPE in_val = nz_values[nz_ptr];
+
+            uint gather_offset = weight_ofm_base + (k_idx * SIMD);
+            FILTER_VEC_TYPE wei = TO_FILTER_VEC_TYPE(FILTER_BLOCK_READ(weights, gather_offset));
+
+            unroll_for (uint fi = 0; fi < TILE_OFM; ++fi) {
+                activated[fi] += (ACCUMULATOR_TYPE)in_val * ((ACCUMULATOR_TYPE*)(&wei))[fi];
+            }
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+#else
+    const uint sglid = get_sub_group_local_id();
+    const uint out_f = (get_group_id(0) * SIMD);
+    const uint out_b = 0; 
+
+    ACCUMULATOR_TYPE activated[TILE_OFM]; 
+    unroll_for(uint i = 0; i < TILE_OFM; i++) {
+        activated[i] = (ACCUMULATOR_TYPE)0;
+    }
+
+    const uint weight_ofm_base = (out_f / SIMD) * INPUT0_ELEMENTS_COUNT * SIMD;
+    const uint iterations = INPUT0_ELEMENTS_COUNT / SIMD;
+
+    for (uint ni = 0; ni < iterations; ++ni) {
+        INPUT0_TYPE val = input[ni * SIMD + sglid];
+
+        uint4 ballot_res = sub_group_ballot(val != (INPUT0_TYPE)0);
+        uint b_mask = ballot_res.s0;
+        if (b_mask == 0) continue;
+
+        while (b_mask > 0) {
+            uint lane_id = ctz(b_mask); 
+            uint k_idx = ni * SIMD + lane_id;
+
+            INPUT0_TYPE in_val = sub_group_broadcast(val, lane_id);
+
+            uint gather_offset = weight_ofm_base + (k_idx * SIMD);
+            FILTER_VEC_TYPE wei = TO_FILTER_VEC_TYPE(FILTER_BLOCK_READ(weights, gather_offset));
+
+            unroll_for (uint fi = 0; fi < TILE_OFM; ++fi) {
+                activated[fi] += (ACCUMULATOR_TYPE)in_val * ((ACCUMULATOR_TYPE*)(&wei))[fi];
+            }
+
+            b_mask &= ~(1 << lane_id);
+        }
+    }
+#endif
+#else // MY_DYN_SPARSITY_GATHER
+
 #if USE_SLM
     uint gid = (uint)get_group_id(0);
     uint local_id = (uint)get_local_id(2);
@@ -351,7 +445,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 #endif
     // =====================================================================================================================================
     // Main computation loop
-    uint iterations = MAIN_LOOP_ELEMENTS_COUNT / (TILE_IFM * SIMD);
+    uint iterations = MAIN_LOOP_ELEMENTS_COUNT / (TILE_IFM * SIMD);     // 4096 / (1*16) => 256
     __attribute__((opencl_unroll_hint(1)))
     for (uint ni = 0; ni < iterations; ++ni) {
         // Load input.
@@ -363,6 +457,20 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
         CONST_LOOP(TILE_B, LOAD_IN_0);
         #undef LOAD_IN_0
         input_offset += TILE_IFM * SIMD - TILE_IN_B_PITCH * TILE_B;
+
+        // My D.S check whether 16 consecutive non zero.. No gain in sparsity but general gain has.
+#ifdef MY_DYN_SPARSITY
+        bool has_data = (((INPUT0_TYPE*)in_0)[0] != (INPUT0_TYPE)0);
+        uint ki_iterations = (TILE_IFM * SIMD) / TILE_K;
+        const uint total_weight_ni_step = ki_iterations * (TILE_K_OFM_PACKED * TILE_OFM_PER_OSV_SIZE * SIMD);
+        static uint my_count = 0;
+        if (!sub_group_any(has_data)) {
+            weights_offset += total_weight_ni_step;
+            // printf("%u, %u\n", my_count++, ni);
+            continue;
+        }
+#endif
+
         // NOTE: Manually unrolling multiplication loop leads to lower register pressure and allows for bigger block sizes,
         //       but significantly degrades readability and generality of code.
         //       It doesn't also show noticable performance improvement on tested configurations.
@@ -484,7 +592,25 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
 
             barrier(CLK_LOCAL_MEM_FENCE);
         #endif
-        unroll_for(uint ki = 0; ki < (TILE_IFM * SIMD) / TILE_K; ++ki) {
+        unroll_for(uint ki = 0; ki < (TILE_IFM * SIMD) / TILE_K; ++ki) {    // (1 * 16) / 4; => 4
+// #ifdef MY_DYN_SPARSITY
+//             // 1. Check if all input elements in this TILE_K block are zero
+//             bool all_zeros = true;
+//             unroll_for(uint kii = 0; kii < TILE_K; ++kii) {
+//                 const uint total_k = ki * TILE_K + kii;
+//                 // Accessing input element. Since TILE_B=1 for 2nd inference, bi is 0.
+//                 INPUT0_TYPE val = ((INPUT0_TYPE*)(&in_0[0]))[total_k];
+//                 if (val != (INPUT0_TYPE)0) {
+//                     all_zeros = false;
+//                 }
+//             }
+//             // 2. Skip logic: If all_zeros is true, we don't need to load weights or compute.
+//             if (all_zeros) {
+//                 // We MUST still increment the offset to keep it aligned for the next 'ki' iteration
+//                 weights_offset += TILE_K_OFM_PACKED * TILE_OFM_PER_OSV_SIZE * SIMD;
+//                 continue; 
+//             }
+// #endif
             #if COMPRESSED_WEIGHTS_INT4
                 #if USE_SLM
                     FILTER_VEC_TYPE wei = 0;
@@ -510,7 +636,93 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
             #else
                 wei = TO_FILTER_VEC_TYPE(FILTER_BLOCK_READ(weights, weights_offset));
             #endif
+#ifdef MY_DYN_SPARSITY
+            #if COMPRESSED_WEIGHTS && !USE_SLM
+                ACCUMULATOR_TYPE* w = (ACCUMULATOR_TYPE*)(&wei);
+                unroll_for(uint kii = 0; kii < TILE_K; ++kii) {
+                    const uint total_k = ki * TILE_K + kii;
+                    INPUT0_TYPE in_val = _sub_group_shuffle(((INPUT0_TYPE*)(&in_0[0]))[total_k / SIMD], total_k % SIMD);
+                    if (in_val == (INPUT0_TYPE)0) continue; // skip weight loading and mad op...
+                    unroll_for(uint fi = 0; fi < TILE_OFM; ++fi) {
+                        const uint offset_ofm = out_f + fi*SIMD + sglid;
+                        #if !DECOMPRESSION_SCALE_POST_OP
+                            // Apply scales before FMA to avoid FP16 overflow in case of INT8
+                            #if DECOMPRESSION_SCALE_GROUPS_NUM > 1
+                                const uint scale_offset = (offset_ofm % DECOMPRESSION_SCALE_BATCH_NUM) * DECOMPRESSION_SCALE_BATCH_PITCH  +
+                                                        ((kii + ki*TILE_K + ni*TILE_IFM*SIMD) / DECOMPRESSION_SCALE_GROUP_SIZE)*DECOMPRESSION_SCALE_FEATURE_PITCH;
+                                ACCUMULATOR_TYPE ds = decompression_scale[scale_offset];
+                            #else
+                            #if OUTER_OFM > 1
+                                ACCUMULATOR_TYPE ds = decompression_scale[offset_ofm];
+                            #else
+                                ACCUMULATOR_TYPE ds = d_scales[fi % DECOMPRESSION_SCALE_LENGTH];
+                            #endif
+                            #endif
+                        #else
+                            ACCUMULATOR_TYPE ds = ACCUMULATOR_VAL_ONE;
+                        #endif
 
+                        #if DECOMPRESSION_ZP_TERM
+                            #if DECOMPRESSION_ZP_SCALAR
+                                ACCUMULATOR_TYPE dzp = DECOMPRESSION_ZP_VALUE;
+                            #elif DECOMPRESSION_ZP_GROUPS_NUM > 1
+                                const uint zp_offset = (offset_ofm % DECOMPRESSION_ZP_BATCH_NUM) * DECOMPRESSION_ZP_BATCH_PITCH +
+                                                    ((kii + ki*TILE_K + ni*TILE_IFM*SIMD) / DECOMPRESSION_ZP_GROUP_SIZE) * DECOMPRESSION_ZP_FEATURE_PITCH;
+                                ACCUMULATOR_TYPE dzp = decompression_zp[zp_offset];
+                            #else
+                            #if OUTER_OFM > 1
+                                ACCUMULATOR_TYPE dzp = decompression_zp[offset_ofm];
+                            #else
+                                ACCUMULATOR_TYPE dzp = d_zps[fi % DECOMPRESSION_ZP_LENGTH];
+                            #endif
+                            #endif
+                        #else
+                            ACCUMULATOR_TYPE dzp = ACCUMULATOR_VAL_ZERO;
+                        #endif
+                        w[W_IDX] = (w[W_IDX] - dzp) * ds;   // W_IDX = fi * TILE_K + kii
+
+#if DECOMPRESSION_SCALE_POST_OP
+                        half weight = ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+                        #if TILE_OFM > 1
+                            ((ACCUMULATOR_TYPE*)(&acc_tmp[0]))[fi] += in_val * weight;
+                        #else
+                            acc_tmp[0] += in_val * weight;
+                        #endif
+#else
+                        #if TILE_OFM > 1
+                            ((ACCUMULATOR_TYPE*)(&acc_tmp[0]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+                        #else
+                            acc_tmp[0] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+                        #endif
+#endif
+                    }
+                }
+            #endif
+
+//             unroll_for (uint kii = 0; kii < TILE_K; ++kii) {
+//                 // const uint total_k = ki * TILE_K + kii;
+//                 unroll_for (uint bi = 0; bi < TILE_B; ++bi) {
+//                     INPUT0_TYPE in_val = _sub_group_shuffle(((INPUT0_TYPE*)(&in_0[bi]))[total_k / SIMD], total_k % SIMD);
+//                     if (in_val == (INPUT0_TYPE)0) continue; // skip only mad op...
+//                     unroll_for (uint fi = 0; fi < TILE_OFM; ++fi) {
+// #if DECOMPRESSION_SCALE_POST_OP
+//                     half weight = ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+//                     #if TILE_OFM > 1
+//                         ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] += in_val * weight;
+//                     #else
+//                         acc_tmp[bi] += in_val * weight;
+//                     #endif
+// #else
+//                     #if TILE_OFM > 1
+//                         ((ACCUMULATOR_TYPE*)(&acc_tmp[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+//                     #else
+//                         acc_tmp[bi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
+//                     #endif
+// #endif
+//                     }
+//                 }
+//             }
+#else   // MY_DYN_SPARSITY ELSE (master with no dirty)
             #if COMPRESSED_WEIGHTS && !USE_SLM
                 ACCUMULATOR_TYPE* w = (ACCUMULATOR_TYPE*)(&wei);
                 unroll_for(uint kii = 0; kii < TILE_K; ++kii) {
@@ -577,6 +789,7 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                     }
                 }
             }
+#endif     // MY_DYN_SPARSITY END
             weights_offset += TILE_K_OFM_PACKED * TILE_OFM_PER_OSV_SIZE * SIMD;
 
 #if DECOMPRESSION_SCALE_POST_OP && (TILE_IFM * SIMD > DECOMPRESSION_SCALE_GROUP_SIZE)
@@ -717,11 +930,14 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
                         const uint total_k = ki * TILE_K + kii;
                         if (total_k < LEFTOVER_IFM) {
                             INPUT0_TYPE in_val = _sub_group_shuffle(((INPUT0_TYPE*)(&in_0[bi]))[total_k / SIMD], total_k % SIMD);
+                            // // d.s test
+                            // if (in_val != (INPUT0_TYPE)0) {
                             #if TILE_OFM > 1
                             ((ACCUMULATOR_TYPE*)(&acc[bi]))[fi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
                             #else
                             acc[bi] += in_val * ((ACCUMULATOR_TYPE*)(&wei))[W_IDX];
                             #endif
+                            // }
                         }
                     }
                 }
@@ -763,6 +979,8 @@ inline void FUNC(fc_bf_tiled_kernel_default)(
     }
     out_f = out_f_init;
 #endif
+
+#endif // MY_DYN_SPARSITY
 
 #if BIAS_TERM
     #if TILE_OUT_F_NUM % (OUTER_OFM * TILE_OFM * SIMD) == 0
@@ -1654,6 +1872,11 @@ KERNEL(fc)(
         #endif
         );
     #else
+        #ifdef MY_DYN_SPARSITY_GATHER
+                    __local uint  nz_indices[16];
+                    __local INPUT0_TYPE nz_values[16];
+                    __local uint  nz_count;
+        #endif
         FUNC_CALL(fc_bf_tiled_kernel_default)(
             OPTIONAL_SHAPE_INFO_TENSOR
             input,
@@ -1667,6 +1890,11 @@ KERNEL(fc)(
             weights
         #if USE_SLM
             , wei_local_mem
+        #endif
+        #ifdef MY_DYN_SPARSITY_GATHER
+            , nz_indices
+            , nz_values
+            , &nz_count
         #endif
         #if BIAS_TERM
             , biases
