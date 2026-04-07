@@ -24,6 +24,8 @@
 #include "compute_runtime/ze_stypes.h"
 
 #include <cassert>
+#include <cstdlib>
+#include <iostream>
 #include <string>
 #include <vector>
 #include <memory>
@@ -36,6 +38,23 @@ namespace cldnn {
 namespace ze {
 
 namespace {
+inline int get_regular_cmd_list_poc_level() {
+    const char* val = std::getenv("OV_GPU_ZE_FORCE_REGULAR_CMD");
+    if (val == nullptr) return 0;
+    int level = std::atoi(val);
+    return level > 0 ? level : 0;
+}
+
+inline bool use_regular_cmd_list_poc() {
+    return get_regular_cmd_list_poc_level() >= 1;
+}
+
+inline void regular_poc_log(const std::string& msg) {
+    if (get_regular_cmd_list_poc_level() >= 2) {
+        std::cerr << "[REGULAR_POC] " << msg << std::endl;
+    }
+}
+
 inline ze_group_count_t to_group_count(const std::vector<size_t>& v) {
      switch (v.size()) {
         case 1:
@@ -213,7 +232,20 @@ ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
         command_queue_desc.pNext = &cp_offload_desc;
     }
 
-    OV_ZE_EXPECT(zeCommandListCreateImmediate(_engine.get_context(), _engine.get_device(), &command_queue_desc, &m_command_list));
+    m_use_regular_cmd_queue = use_regular_cmd_list_poc();
+    if (m_use_regular_cmd_queue) {
+        regular_poc_log("ze_stream ctor: create single shared regular queue/list");
+        ze_command_list_desc_t command_list_desc = {};
+        command_list_desc.stype = ZE_STRUCTURE_TYPE_COMMAND_LIST_DESC;
+        command_list_desc.pNext = nullptr;
+        command_list_desc.commandQueueGroupOrdinal = info.compute_queue_group_ordinal;
+        command_list_desc.flags = m_queue_type == QueueTypes::out_of_order ? 0 : ZE_COMMAND_LIST_FLAG_IN_ORDER;
+
+        OV_ZE_EXPECT(zeCommandQueueCreate(_engine.get_context(), _engine.get_device(), &command_queue_desc, &m_command_queue));
+        OV_ZE_EXPECT(zeCommandListCreate(_engine.get_context(), _engine.get_device(), &command_list_desc, &m_command_list));
+    } else {
+        OV_ZE_EXPECT(zeCommandListCreateImmediate(_engine.get_context(), _engine.get_device(), &command_queue_desc, &m_command_list));
+    }
     bool use_counter_based_events = m_queue_type == QueueTypes::in_order && info.supports_counter_based_events;
     m_user_ev_factory = std::make_shared<ze_event_factory>(engine, config.get_enable_profiling());
     if (use_counter_based_events) {
@@ -224,6 +256,7 @@ ze_stream::ze_stream(const ze_engine &engine, const ExecutionConfig& config)
     }
     GPU_DEBUG_INFO << "[GPU] Created L0 stream ("
         << "index=" << index
+        << ", regular_cmd_queue=" << m_use_regular_cmd_queue
         << ", use_cp_offload=" << use_cp_offload
         << ", use_counter_based_events=" << use_counter_based_events
         << ")" << std::endl;
@@ -236,6 +269,12 @@ ze_stream::~ze_stream() {
 #endif
     if (m_command_list != nullptr)
         OV_ZE_WARN(zeCommandListDestroy(m_command_list));
+    if (m_onednn_command_list != nullptr)
+        OV_ZE_WARN(zeCommandListDestroy(m_onednn_command_list));
+    if (m_command_queue != nullptr)
+        OV_ZE_WARN(zeCommandQueueDestroy(m_command_queue));
+    if (m_onednn_command_queue != nullptr)
+        OV_ZE_WARN(zeCommandQueueDestroy(m_onednn_command_queue));
 }
 
 void ze_stream::set_arguments(kernel& kernel, const kernel_arguments_desc& args_desc, const kernel_arguments_data& args) {
@@ -255,6 +294,9 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
     auto& ze_kernel = downcast<ze::ze_kernel>(kernel);
 
     auto kern = ze_kernel.get_kernel_handle();
+
+    // If command list was submitted but not yet reset, sync and reset before appending new work
+    ensure_cmd_list_ready();
 
     std::vector<ze_event_handle_t> dep_events;
     std::vector<ze_event_handle_t>* dep_events_ptr = nullptr;
@@ -282,15 +324,26 @@ event::ptr ze_stream::enqueue_kernel(kernel& kernel,
                                              set_output_event ? std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle() : nullptr,
                                              dep_events_ptr == nullptr ? 0 : static_cast<uint32_t>(dep_events_ptr->size()),
                                              dep_events_ptr == nullptr ? 0 : &dep_events_ptr->front()));
+    if (m_use_regular_cmd_queue) {
+        m_regular_has_pending_cmds = true;
+        if (m_sync_method == SyncMethods::events || is_output) {
+            flush();
+        }
+    }
 
     return ev;
 }
 
 void ze_stream::enqueue_barrier() {
+    ensure_cmd_list_ready();
     OV_ZE_EXPECT(zeCommandListAppendBarrier(m_command_list, nullptr, 0, nullptr));
+    if (m_use_regular_cmd_queue) {
+        m_regular_has_pending_cmds = true;
+    }
 }
 
 event::ptr ze_stream::enqueue_marker(std::vector<ze_event::ptr> const& deps, bool is_output) {
+    ensure_cmd_list_ready();
     if (deps.empty()) {
         auto ev = create_base_event();
         OV_ZE_EXPECT(zeCommandListAppendBarrier(m_command_list, std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle(), 0, nullptr));
@@ -313,6 +366,12 @@ event::ptr ze_stream::enqueue_marker(std::vector<ze_event::ptr> const& deps, boo
                                             std::dynamic_pointer_cast<ze_base_event>(ev)->get_handle(),
                                             static_cast<uint32_t>(dep_events.size()),
                                             &dep_events.front()));
+        if (m_use_regular_cmd_queue) {
+            m_regular_has_pending_cmds = true;
+            if (is_output) {
+                flush();
+            }
+        }
         return ev;
     } else if (m_sync_method == SyncMethods::barriers) {
         sync_events(deps, is_output);
@@ -349,14 +408,79 @@ std::unique_ptr<surfaces_lock> ze_stream::create_surfaces_lock(const std::vector
 }
 
 void ze_stream::flush() const {
-    // Immediate Command List submits commands immediately - no flush impl
+    if (!m_use_regular_cmd_queue) {
+        return;
+    }
+
+    regular_poc_log("ze_stream::flush begin pending=" + std::to_string(m_regular_has_pending_cmds) + " submitted=" + std::to_string(m_regular_has_submitted));
+
+    if (m_regular_has_pending_cmds) {
+        if (!m_regular_list_is_closed) {
+            OV_ZE_EXPECT(zeCommandListClose(m_command_list));
+            m_regular_list_is_closed = true;
+        }
+
+        ze_command_list_handle_t cmd_lists[] = {m_command_list};
+        OV_ZE_EXPECT(zeCommandQueueExecuteCommandLists(m_command_queue, 1, cmd_lists, nullptr));
+        // Note: no synchronize here — submit only. finish() will sync + reset.
+        m_regular_has_submitted = true;
+        m_regular_has_pending_cmds = false;
+    }
+
+    regular_poc_log("ze_stream::flush end");
 }
 
 void ze_stream::finish() const {
+    if (m_use_regular_cmd_queue) {
+        flush();
+        OV_ZE_EXPECT(zeCommandQueueSynchronize(m_command_queue, endless_wait));
+        if (m_regular_has_submitted) {
+            OV_ZE_EXPECT(zeCommandListReset(m_command_list));
+            m_regular_list_is_closed = false;
+            m_regular_has_submitted = false;
+        }
+        return;
+    }
+
     OV_ZE_EXPECT(zeCommandListHostSynchronize(m_command_list, endless_wait));
 }
 
+void ze_stream::mark_onednn_pending() const {
+    if (m_use_regular_cmd_queue) {
+        m_regular_has_pending_cmds = true;
+        regular_poc_log("mark_onednn_pending: set pending=true");
+    }
+}
+
+void ze_stream::ensure_cmd_list_ready() const {
+    regular_poc_log("ensure_cmd_list_ready: submitted=" + std::to_string(m_regular_has_submitted));
+    if (m_use_regular_cmd_queue && m_regular_has_submitted) {
+        OV_ZE_EXPECT(zeCommandQueueSynchronize(m_command_queue, endless_wait));
+        OV_ZE_EXPECT(zeCommandListReset(m_command_list));
+        m_regular_list_is_closed = false;
+        m_regular_has_submitted = false;
+    }
+}
+
 void ze_stream::wait_for_events(const std::vector<event::ptr>& events) {
+    if (m_use_regular_cmd_queue) {
+        flush();
+
+        bool needs_sync = false;
+        for (auto& ev : events) {
+            auto* ze_base_ev = dynamic_cast<ze_base_event*>(ev.get());
+            if (ze_base_ev == nullptr || ze_base_ev->get_handle() == nullptr) {
+                needs_sync = true;
+            }
+        }
+
+        if (needs_sync) {
+            finish();
+        }
+
+        return;
+    }
+
     bool needs_sync = false;
     for (auto& ev : events) {
         auto* ze_base_ev = dynamic_cast<ze_base_event*>(ev.get());
@@ -406,7 +530,19 @@ dnnl::stream& ze_stream::get_onednn_stream() {
     OPENVINO_ASSERT(m_queue_type == QueueTypes::in_order, "[GPU] Can't create onednn stream handle as onednn doesn't support out-of-order queue");
     OPENVINO_ASSERT(_engine.get_device_info().vendor_id == INTEL_VENDOR_ID, "[GPU] Can't create onednn stream handle as for non-Intel devices");
     if (!_onednn_stream) {
-        _onednn_stream = std::make_shared<dnnl::stream>(dnnl::ze_interop::make_stream(_engine.get_onednn_engine(), m_command_list, m_ev_factory->is_profiling_enabled()));
+        if (m_use_regular_cmd_queue) {
+            regular_poc_log("ze_stream::get_onednn_stream create shared regular oneDNN stream");
+            OPENVINO_ASSERT(m_command_queue != nullptr, "[GPU] regular command queue is not initialized");
+            OPENVINO_ASSERT(m_command_list != nullptr, "[GPU] regular command list is not initialized");
+            _onednn_stream = std::make_shared<dnnl::stream>(dnnl::ze_interop::make_stream(_engine.get_onednn_engine(),
+                                                                                           m_command_queue,
+                                                                                           m_command_list,
+                                                                                           m_ev_factory->is_profiling_enabled()));
+        } else {
+            _onednn_stream = std::make_shared<dnnl::stream>(dnnl::ze_interop::make_stream(_engine.get_onednn_engine(),
+                                                                                           m_command_list,
+                                                                                           m_ev_factory->is_profiling_enabled()));
+        }
     }
 
     return *_onednn_stream;

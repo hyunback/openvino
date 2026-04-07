@@ -117,14 +117,31 @@ void* gpu_usm::lock(const stream& stream, mem_lock_type type) {
             }
             GPU_DEBUG_LOG << "Copy usm_device buffer to host buffer." << std::endl;
             _host_buffer.allocateHost(_bytes_count);
-            OV_ZE_EXPECT(zeCommandListAppendMemoryCopy(_ze_stream.get_queue(),
-                                    _host_buffer.get(),
-                                    _buffer.get(),
-                                    _bytes_count,
-                                    nullptr,
-                                    0,
-                                    nullptr));
-            OV_ZE_EXPECT(zeCommandListHostSynchronize(_ze_stream.get_queue(), endless_wait));
+            if (_ze_stream.uses_regular_command_queue()) {
+                // Regular mode: finish pending work first, then use the shared command list
+                // to copy and sync via the command queue path.
+                _ze_stream.finish();
+                _ze_stream.ensure_cmd_list_ready();
+                OV_ZE_EXPECT(zeCommandListAppendMemoryCopy(_ze_stream.get_queue(),
+                                        _host_buffer.get(),
+                                        _buffer.get(),
+                                        _bytes_count,
+                                        nullptr,
+                                        0,
+                                        nullptr));
+                _ze_stream.mark_onednn_pending();  // Mark pending so flush() will close+execute
+                _ze_stream.flush();
+                _ze_stream.finish();
+            } else {
+                OV_ZE_EXPECT(zeCommandListAppendMemoryCopy(_ze_stream.get_queue(),
+                                        _host_buffer.get(),
+                                        _buffer.get(),
+                                        _bytes_count,
+                                        nullptr,
+                                        0,
+                                        nullptr));
+                OV_ZE_EXPECT(zeCommandListHostSynchronize(_ze_stream.get_queue(), endless_wait));
+            }
             _mapped_ptr = _host_buffer.get();
         } else {
             _mapped_ptr = _buffer.get();
@@ -147,6 +164,7 @@ void gpu_usm::unlock(const stream& /* stream */) {
 
 event::ptr gpu_usm::fill(stream& stream, unsigned char pattern, const std::vector<event::ptr>& dep_events, bool blocking) {
     auto& _ze_stream = downcast<ze_stream>(stream);
+    _ze_stream.ensure_cmd_list_ready();
     auto ev = _ze_stream.create_base_event();
     auto ev_ze = downcast<ze::ze_base_event>(ev.get())->get_handle();
     auto ze_dep_events = get_ze_events(dep_events);
@@ -158,6 +176,7 @@ event::ptr gpu_usm::fill(stream& stream, unsigned char pattern, const std::vecto
         ev_ze,
         ze_dep_events.size(),
         ze_dep_events.data()));
+    _ze_stream.mark_onednn_pending();
     if (blocking) {
         ev->wait();
     }
@@ -175,6 +194,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const void* data_ptr, size_t src_o
     check_boundaries(SIZE_MAX, src_offset, _bytes_count, dst_offset, size, "gpu_usm::copy_from(void*)");
 
     auto _ze_stream = downcast<ze_stream>(&stream);
+    _ze_stream->ensure_cmd_list_ready();
     auto _ze_event = downcast<ze_base_event>(result_event.get())->get_handle();
     auto src_ptr = reinterpret_cast<const char*>(data_ptr) + src_offset;
     auto dst_ptr = reinterpret_cast<char*>(buffer_ptr()) + dst_offset;
@@ -186,6 +206,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const void* data_ptr, size_t src_o
                                            _ze_event,
                                            0,
                                            nullptr));
+    _ze_stream->mark_onednn_pending();
 
     if (blocking) {
         result_event->wait();
@@ -201,6 +222,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const memory& src_mem, size_t src_
     check_boundaries(src_mem.size(), src_offset, _bytes_count, dst_offset, size, "gpu_usm::copy_from(memory&)");
 
     auto _ze_stream = downcast<ze_stream>(&stream);
+    _ze_stream->ensure_cmd_list_ready();
     auto _ze_event = downcast<ze_base_event>(result_event.get())->get_handle();
     OPENVINO_ASSERT(memory_capabilities::is_usm_type(src_mem.get_allocation_type()));
 
@@ -215,6 +237,7 @@ event::ptr gpu_usm::copy_from(stream& stream, const memory& src_mem, size_t src_
                                            _ze_event,
                                            0,
                                            nullptr));
+    _ze_stream->mark_onednn_pending();
     if (blocking) {
         result_event->wait();
     }
@@ -229,6 +252,7 @@ event::ptr gpu_usm::copy_to(stream& stream, void* data_ptr, size_t src_offset, s
     check_boundaries(_bytes_count, src_offset, SIZE_MAX, dst_offset, size, "gpu_usm::copy_to(void*)");
 
     auto _ze_stream = downcast<ze_stream>(&stream);
+    _ze_stream->ensure_cmd_list_ready();
     auto _ze_event = downcast<ze_base_event>(result_event.get())->get_handle();
     auto src_ptr = reinterpret_cast<const char*>(buffer_ptr()) + src_offset;
     auto dst_ptr = reinterpret_cast<char*>(data_ptr) + dst_offset;
@@ -240,6 +264,7 @@ event::ptr gpu_usm::copy_to(stream& stream, void* data_ptr, size_t src_offset, s
                                            _ze_event,
                                            0,
                                            nullptr));
+    _ze_stream->mark_onednn_pending();
     if (blocking) {
         result_event->wait();
     }

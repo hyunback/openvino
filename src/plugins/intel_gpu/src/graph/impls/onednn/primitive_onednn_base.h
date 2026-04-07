@@ -19,6 +19,7 @@
 
 #include <vector>
 #include <utility>
+#include <cstdlib>
 
 #include <oneapi/dnnl/dnnl.hpp>
 
@@ -26,6 +27,23 @@ namespace cldnn {
 namespace onednn {
 
 static std::mutex cacheAccessMutex;
+
+inline int get_regular_cmd_sync_poc_level() {
+    const char* val = std::getenv("OV_GPU_ZE_FORCE_REGULAR_CMD");
+    if (val == nullptr) return 0;
+    int level = std::atoi(val);
+    return level > 0 ? level : 0;
+}
+
+inline bool regular_cmd_sync_poc_enabled() {
+    return get_regular_cmd_sync_poc_level() >= 1;
+}
+
+inline void regular_cmd_sync_poc_log(const std::string& msg) {
+    if (get_regular_cmd_sync_poc_level() >= 2) {
+        std::cerr << "[REGULAR_POC][primitive] " << msg << std::endl;
+    }
+}
 
 template <class PType, class PrimDescType = dnnl::primitive_desc, class PrimType = dnnl::primitive>
 struct typed_primitive_onednn_impl : public typed_primitive_impl<PType> {
@@ -544,7 +562,14 @@ protected:
 
         if (!instance.can_be_optimized()) {
             try {
-                _prim.execute(stream.get_onednn_stream(), _args[net_id]);
+                regular_cmd_sync_poc_log("execute_impl before get_onednn_stream");
+                auto& onednn_stream = stream.get_onednn_stream();
+                regular_cmd_sync_poc_log("execute_impl after get_onednn_stream");
+                stream.ensure_cmd_list_ready();
+                regular_cmd_sync_poc_log("execute_impl before _prim.execute");
+                _prim.execute(onednn_stream, _args[net_id]);
+                stream.mark_onednn_pending();
+                regular_cmd_sync_poc_log("execute_impl after _prim.execute");
             } catch (dnnl::error& err) {
                 OPENVINO_THROW(err.what());
             }

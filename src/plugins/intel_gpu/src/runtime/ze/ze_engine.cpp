@@ -19,12 +19,33 @@
 #include <vector>
 #include <memory>
 #include <stdexcept>
+#include <cstdlib>
+#include <iostream>
 
 #ifdef ENABLE_ONEDNN_FOR_GPU
 #include <oneapi/dnnl/dnnl_ze.hpp>
 #endif
 namespace cldnn {
 namespace ze {
+
+namespace {
+inline int get_regular_cmd_debug_level() {
+    const char* val = std::getenv("OV_GPU_ZE_FORCE_REGULAR_CMD");
+    if (val == nullptr) return 0;
+    int level = std::atoi(val);
+    return level > 0 ? level : 0;
+}
+
+inline bool regular_cmd_debug_enabled() {
+    return get_regular_cmd_debug_level() >= 1;
+}
+
+inline void regular_cmd_debug_log(const std::string& msg) {
+    if (get_regular_cmd_debug_level() >= 2) {
+        std::cerr << "[REGULAR_POC] " << msg << std::endl;
+    }
+}
+}  // namespace
 
 ze_engine::ze_engine(const device::ptr dev, runtime_types runtime_type)
     : engine(dev) {
@@ -78,9 +99,21 @@ memory::ptr ze_engine::allocate_memory(const layout& layout, allocation_type typ
         memory::ptr res = std::make_shared<ze::gpu_usm>(this, layout, type);
 
         if (reset || res->is_memory_reset_needed(layout)) {
-            auto ev = res->fill(get_service_stream());
+            auto& service_stream = get_service_stream();
+            regular_cmd_debug_log("ze_engine::allocate_memory fill begin");
+            auto ev = res->fill(service_stream, {}, false);
+            regular_cmd_debug_log("ze_engine::allocate_memory fill end");
             if (ev) {
-                get_service_stream().wait_for_events({ev});
+                if (auto* ze_service_stream = dynamic_cast<ze::ze_stream*>(&service_stream);
+                    ze_service_stream != nullptr && ze_service_stream->uses_regular_command_queue()) {
+                    regular_cmd_debug_log("ze_engine::allocate_memory service_stream.finish begin");
+                    service_stream.finish();
+                    regular_cmd_debug_log("ze_engine::allocate_memory service_stream.finish end");
+                } else {
+                    regular_cmd_debug_log("ze_engine::allocate_memory wait_for_events begin");
+                    service_stream.wait_for_events({ev});
+                    regular_cmd_debug_log("ze_engine::allocate_memory wait_for_events end");
+                }
             }
         }
 
