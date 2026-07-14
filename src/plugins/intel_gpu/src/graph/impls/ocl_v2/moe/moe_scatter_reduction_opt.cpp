@@ -3,6 +3,8 @@
 //
 #include "moe_scatter_reduction_opt.hpp"
 
+#include <cstdlib>
+
 #include "../common_utils/dispatch_utils.hpp"
 #include "../common_utils/jitter.hpp"
 #include "../primitive_ocl_base.hpp"
@@ -51,6 +53,14 @@ protected:
         jit.make("VEC_BLK_SIZE", MoeScatterReductionOpt::block_size);
         jit.make("BATCHES_PER_THREAD", batches_per_thread);
         jit.make("ONEDNN_GROUPED_GEMM_USED", desc->onednn_grouped_gemm_used);
+
+        const char* threshold_env = std::getenv("OV_GPU_MOE_SCATTER_SEARCH_THRESHOLD");
+        if (threshold_env) {
+            int threshold = std::atoi(threshold_env);
+            if (threshold >= 0) {
+                jit.make("MOE_SCATTER_PARALLEL_SEARCH_THRESHOLD", threshold);
+            }
+        }
 
         return jit;
     }

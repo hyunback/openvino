@@ -1781,6 +1781,10 @@ void TransformationsPipeline::apply(std::shared_ptr<ov::Model> func) {
             }
         }
 
+        // CSE for DynQuant: deduplicate identical DynamicQuantize nodes sharing same input
+        if (!std::getenv("OV_GPU_DISABLE_DYNQUANT_CSE"))
+            manager.register_pass<ov::pass::SharedOpOptimization>();
+
         // Remove Pad in front of MaxPool if both the pads_begin and pads_end are zero.
         manager.register_pass<ov::pass::EliminatePad>();
 

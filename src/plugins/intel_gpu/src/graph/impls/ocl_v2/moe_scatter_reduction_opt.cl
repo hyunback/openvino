@@ -70,9 +70,11 @@ KERNEL(moe_scatter_reduction_ref)(
             INPUT4_TYPE expert_offset = experts_start_offset[start_offset_index[i]];
         #endif
 
-        // Hybrid search: use single thread for short sequences to benefit from early exit,
-        // and parallel search for long sequences to utilize memory bandwidth.
+#ifdef MOE_SCATTER_PARALLEL_SEARCH_THRESHOLD
+        if (token_len < MOE_SCATTER_PARALLEL_SEARCH_THRESHOLD) {
+#else
         if (token_len < 256) {
+#endif
             if (threads_index == 0) {
                 for (uint tid = 0; tid < token_len; tid++) {
                     if (tokens_per_expert[expert_offset + tid] == token_group_id) {

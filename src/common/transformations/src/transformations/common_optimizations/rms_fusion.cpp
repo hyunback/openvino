@@ -4,6 +4,9 @@
 
 #include "transformations/common_optimizations/rms_fusion.hpp"
 
+#include <cstdlib>
+#include <string>
+
 #include "openvino/core/graph_util.hpp"
 #include "openvino/core/rt_info.hpp"
 #include "openvino/op/add.hpp"
@@ -110,7 +113,9 @@ RMSFusion::RMSFusion(bool force_tail_convert, bool enable_div_x, bool enable_wit
         // This allows partial fusion: only fuse up to mul_or_div
         auto scale = pattern::any_input(pattern::class_other_than<v0::Constant>());
         auto mul_with_scale = pattern::wrap_type<v1::Multiply>({mul_or_div, scale});
-        rms_mul = std::make_shared<pattern::op::Or>(OutputVector{mul_with_gamma, mul_with_scale});
+        // Pattern 3: RMS without gamma (unit normalization, e.g. Gemma v_norm)
+        // x * 1/Sqrt(ReduceMean(x^2,axes)+eps) — no trailing Multiply
+        rms_mul = std::make_shared<pattern::op::Or>(OutputVector{mul_with_gamma, mul_with_scale, mul_or_div});
     } else {
         rms_mul = mul_with_gamma;
     }
@@ -138,6 +143,12 @@ RMSFusion::RMSFusion(bool force_tail_convert, bool enable_div_x, bool enable_wit
 
         auto mul_or_div_node = pattern_map.at(mul_or_div).get_node_shared_ptr();
         bool elementwise_affine = pattern_map.count(mul_with_gamma);
+
+        if (!elementwise_affine && m.get_match_root() == mul_or_div_node) {
+            static const char* disable = std::getenv("OV_GPU_DISABLE_RMS_NOGAMMA");
+            if (disable && std::string(disable) == "1")
+                return false;
+        }
 
         std::shared_ptr<ov::Node> gamma_node;
         if (elementwise_affine) {
@@ -185,5 +196,6 @@ RMSFusion::RMSFusion(bool force_tail_convert, bool enable_div_x, bool enable_wit
     auto m = std::make_shared<pattern::Matcher>(comp, "RMSFusion");
     this->register_matcher(m, callback);
 }
+
 
 }  // namespace ov::pass
