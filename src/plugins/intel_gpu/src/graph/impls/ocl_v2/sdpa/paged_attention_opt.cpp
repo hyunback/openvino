@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <utility>
 
@@ -1410,7 +1411,9 @@ public:
             // issues (inf/nan, run-to-run nondeterminism in the generated systolic ugemm). Falls back to
             // the OCL paged_attention path for all stages where micro SDPA is selectable (PREFILL / MIXED)
             // and for all KV dtypes.
-            if (params.get_device_info().arch == gpu_arch::xe3p) {
+            // POC knob (OV_GPU_FORCE_SDPA_MICRO=1): bypass the WA so micro SDPA can be measured.
+            static const bool force_micro = std::getenv("OV_GPU_FORCE_SDPA_MICRO") != nullptr;
+            if (params.get_device_info().arch == gpu_arch::xe3p && !force_micro) {
                 return false;
             }
         } else {

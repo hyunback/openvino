@@ -19,6 +19,9 @@
 #include "sdpa_base.hpp"
 #include "../utils/kernel_generator.hpp"
 
+#include <array>
+#include <cstdlib>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
@@ -856,9 +859,11 @@ sdpa_config_t* choose_config_xe3p(int head_size, int seq, bool thin_q, bool quan
     //   hs<=512 : plain -> h512 ; 2nd -> h512_2nd ; quant|2nd / plain|quant
     //             (via {xe3p,512,fma|quant}) -> q_h512_2nd
     //   hs>512  : no xe3p row -> fall back to xe2
-	// xe3p tuning table is only for non-PA SDPA; PA uses the xe2 fallback below because
-	// xe3p-specific PA configs have not been validated yet.
-	if(!is_pa) {
+    // xe3p tuning table is only for non-PA SDPA; PA uses the xe2 fallback below because
+    // xe3p-specific PA configs have not been validated yet.
+    // POC knob (OV_GPU_SDPA_MICRO_XE3P_PA=1): let PA use the xe3p table too, to measure it.
+    static const bool xe3p_for_pa = std::getenv("OV_GPU_SDPA_MICRO_XE3P_PA") != nullptr;
+    if (!is_pa || xe3p_for_pa) {
     if (head_size <= 32) {
         if (thin_q)
             return quantized ? &xe3p_h32 : &xe3p_h64_2nd;
@@ -889,8 +894,40 @@ sdpa_config_t* choose_config_xe3p(int head_size, int seq, bool thin_q, bool quan
             return &xe3p_q_h512_2nd;  // {xe3p,512, fma|quant} (fma folded; same config)
         return &xe3p_h512;            // {xe3p,512} plain
     }
-	}
+    }
     return choose_config_xe2(head_size, seq, thin_q, quantized, is_integrated, is_pa, is_prefill);
+}
+
+// POC knobs for the config A/B experiments. All are read once from the environment.
+//   OV_GPU_SDPA_MICRO_CONFIG_ARCH=xe_hpg|xe_hpc|xe2|xe3p  force which choose_config_* table is used
+//   OV_GPU_SDPA_MICRO_CONFIG="m_kq,n_kq,m_vs,n_vs,wgm_kq,wgn_kq,wgm_vs,wgn_vs"  override, prefill
+//   OV_GPU_SDPA_MICRO_CONFIG_2ND="..."                                          override, 2nd token
+sdpa_config_t* apply_config_env_overrides(sdpa_config_t* config, bool is_prefill) {
+    auto parse = [](const char* name) -> std::optional<sdpa_config_t> {
+        const char* raw = std::getenv(name);
+        if (raw == nullptr || *raw == '\0')
+            return std::nullopt;
+
+        std::array<int, 8> values{};
+        size_t count = 0;
+        std::stringstream ss(raw);
+        std::string token;
+        while (std::getline(ss, token, ',') && count < values.size())
+            values[count++] = std::stoi(token);
+
+        OPENVINO_ASSERT(count == values.size(), "[GPU] ", name, " must be 8 comma-separated integers, got: ", raw);
+        return sdpa_config_t{values[0], values[1], values[2], values[3], values[4], values[5], values[6], values[7]};
+    };
+
+    static const std::optional<sdpa_config_t> forced = parse("OV_GPU_SDPA_MICRO_CONFIG");
+    static const std::optional<sdpa_config_t> forced_2nd = parse("OV_GPU_SDPA_MICRO_CONFIG_2ND");
+
+    const auto& selected = is_prefill ? forced : forced_2nd;
+    if (!selected.has_value())
+        return config;
+
+    // Returned pointer must outlive the call; the parsed values are static and immutable.
+    return const_cast<sdpa_config_t*>(&selected.value());
 }
 
 }  // namespace
@@ -1611,7 +1648,24 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
 
     GPU_DEBUG_TRACE_DETAIL << "k_head_size = " << k_head_size << ", nkeys_v = " << nkeys_v << "\n";
     GPU_DEBUG_TRACE_DETAIL << "thin_q = " << thin_q << ", is_quantized = " << is_quantized << "\n";
-    switch (device_info.arch) {
+    // POC knob (OV_GPU_SDPA_MICRO_CONFIG_ARCH): pick the tuning table of another arch.
+    auto config_arch = device_info.arch;
+    static const char* const arch_override = std::getenv("OV_GPU_SDPA_MICRO_CONFIG_ARCH");
+    if (arch_override != nullptr) {
+        const std::string name(arch_override);
+        if (name == "xe_hpg")
+            config_arch = gpu_arch::xe_hpg;
+        else if (name == "xe_hpc")
+            config_arch = gpu_arch::xe_hpc;
+        else if (name == "xe2" || name == "xe3")
+            config_arch = gpu_arch::xe2;
+        else if (name == "xe3p")
+            config_arch = gpu_arch::xe3p;
+        else
+            OPENVINO_THROW("[GPU] Unknown OV_GPU_SDPA_MICRO_CONFIG_ARCH: ", name, " (xe_hpg|xe_hpc|xe2|xe3|xe3p)");
+    }
+
+    switch (config_arch) {
     case gpu_arch::xe_hpg: {
         config = choose_config_xehpg(static_cast<int32_t>(k_head_size), nkeys_v, thin_q, is_quantized, is_paged_attention, is_prefill);
         break;
@@ -1630,6 +1684,7 @@ void SDPAMicroGenerator::init_microkernels(const kernel_impl_params& params,
     }
 
     OPENVINO_ASSERT(config != nullptr);
+    config = apply_config_env_overrides(config, is_prefill);
 
     GPU_DEBUG_IF(ExecutionConfig::get_verbose() >= static_cast<std::underlying_type_t<LogLevel>>(LogLevel::TRACE_DETAIL)) {
         std::ostringstream oss;

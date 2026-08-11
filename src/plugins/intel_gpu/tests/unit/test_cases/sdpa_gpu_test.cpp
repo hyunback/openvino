@@ -295,6 +295,9 @@ struct onednn_sdpa_test_params {
     bool use_runtime_scale = false;
     bool use_runtime_mask = false;
     bool dynamic = false;
+    // Stored output layout relative to the [B, H, L, D] SDPA result: stored[i] == logical[order[i]].
+    // Real LLM graphs get {0, 2, 1, 3} here because TransposeFusion folds the trailing Transpose in.
+    std::vector<int64_t> output_transpose_order = {0, 1, 2, 3};
 };
 
 struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_params> {
@@ -317,7 +320,8 @@ struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_p
                                       const std::optional<layout>& mask_layout,
                                       const std::optional<layout>& scale_layout,
                                       bool use_onednn,
-                                      const std::optional<float>& scale_val) {
+                                      const std::optional<float>& scale_val,
+                                      const std::vector<int64_t>& output_transpose_order) {
         auto& engine = get_test_engine();
 
         topology topo;
@@ -342,7 +346,7 @@ struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_p
                                                  {0, 1, 2, 3},
                                                  {0, 1, 2, 3},
                                                  {0, 1, 2, 3},
-                                                 {0, 1, 2, 3},
+                                                 output_transpose_order,
                                                  {},
                                                  false);
         if (scale_val.has_value()) {
@@ -428,7 +432,7 @@ struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_p
             set_values(scale_mem, scale_data);
         }
 
-        auto onednn_net = build_network(q_topology_layout, k_topology_layout, v_topology_layout, mask_topology_layout, scale_topology_layout, true, p.scale_val);
+        auto onednn_net = build_network(q_topology_layout, k_topology_layout, v_topology_layout, mask_topology_layout, scale_topology_layout, true, p.scale_val, p.output_transpose_order);
         assert_onednn_sdpa_selected(onednn_net);
 
         auto set_inputs = [&](const network::ptr& net) {
@@ -443,7 +447,7 @@ struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_p
 
         set_inputs(onednn_net);
 
-        auto ref_net = build_network(q_topology_layout, k_topology_layout, v_topology_layout, mask_topology_layout, scale_topology_layout, false, p.scale_val);
+        auto ref_net = build_network(q_topology_layout, k_topology_layout, v_topology_layout, mask_topology_layout, scale_topology_layout, false, p.scale_val, p.output_transpose_order);
         set_inputs(ref_net);
 
         auto ref_output = ref_net->execute().at("sdpa").get_memory();
@@ -490,6 +494,11 @@ struct onednn_sdpa_gpu_test : public ::testing::TestWithParam<onednn_sdpa_test_p
         if (info.param.dynamic) {
             result += "_dynamic";
         }
+        if (info.param.output_transpose_order != std::vector<int64_t>{0, 1, 2, 3}) {
+            result += "_out_order";
+            for (auto axis : info.param.output_transpose_order)
+                result += std::to_string(axis);
+        }
         return result;
     }
 };
@@ -518,7 +527,8 @@ TEST(onednn_sdpa_gpu_validation_test, rejects_unsupported_runtime_scale_and_batc
                                                                  std::nullopt,
                                                                  invalid_scale_layout,
                                                                  true,
-                                                                 std::nullopt);
+                                                                 std::nullopt,
+                                                                 {0, 1, 2, 3});
     onednn_sdpa_gpu_test::assert_onednn_sdpa_not_selected(invalid_scale_net);
 
     const layout broadcast_k_layout({1, 2, 6, 32}, data_types::f16, format::bfyx);
@@ -529,7 +539,8 @@ TEST(onednn_sdpa_gpu_validation_test, rejects_unsupported_runtime_scale_and_batc
                                                                   std::nullopt,
                                                                   std::nullopt,
                                                                   true,
-                                                                  std::nullopt);
+                                                                  std::nullopt,
+                                                                  {0, 1, 2, 3});
     onednn_sdpa_gpu_test::assert_onednn_sdpa_not_selected(batch_broadcast_net);
 }
 
@@ -540,7 +551,11 @@ INSTANTIATE_TEST_SUITE_P(
         onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt},
         onednn_sdpa_test_params{1, 2, 4, 6, 32, 0.125f},
         onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, false, true, true},
-        onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, true, true, true}
+        onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, true, true, true},
+        // Transposed output layout, as produced by TransposeFusion in real LLM graphs.
+        onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, false, false, false, {0, 2, 1, 3}},
+        onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, false, false, true, {0, 2, 1, 3}},
+        onednn_sdpa_test_params{1, 2, 4, 6, 32, std::nullopt, true, true, true, {0, 2, 1, 3}}
     ),
     onednn_sdpa_gpu_test::PrintToStringParamName);
 #endif

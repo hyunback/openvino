@@ -12,9 +12,53 @@
 
 #include <algorithm>
 #include <array>
+#include <vector>
 
 namespace cldnn {
 namespace onednn {
+
+// Transpose-order helpers, shared with sdpa_onednn.cpp.
+//
+// OV semantics (scaled_dot_product_attention.cpp calc_output_layouts):
+//     stored[i] == logical[order[i]]
+// so `order` maps a stored axis to the logical (pre-transpose) axis it came from, and an
+// empty order means identity. oneDNN operates on the logical [B, H, L, D] view, so we need
+// the inverse (logical -> stored) to tell it where each logical axis lives in memory.
+inline bool is_identity_transpose_order(const std::vector<int64_t>& order) {
+    for (size_t idx = 0; idx < order.size(); ++idx) {
+        if (order[idx] != static_cast<int64_t>(idx))
+            return false;
+    }
+    return true;
+}
+
+// Identity (empty) or any permutation of {0, 1, 2, 3}.
+inline bool is_valid_4d_transpose_order(const std::vector<int64_t>& order) {
+    if (order.empty())
+        return true;
+    if (order.size() != 4)
+        return false;
+
+    std::array<bool, 4> seen = {};
+    for (auto axis : order) {
+        if (axis < 0 || axis > 3 || seen[static_cast<size_t>(axis)])
+            return false;
+        seen[static_cast<size_t>(axis)] = true;
+    }
+    return true;
+}
+
+inline bool is_identity_4d_transpose_order(const std::vector<int64_t>& order) {
+    return is_valid_4d_transpose_order(order) && is_identity_transpose_order(order);
+}
+
+// inverse[logical_axis] = stored_axis. Order must be validated by is_valid_4d_transpose_order first.
+inline std::array<size_t, 4> inverse_4d_transpose_order(const std::vector<int64_t>& order) {
+    std::array<size_t, 4> inverse = {0, 1, 2, 3};
+    for (size_t stored_axis = 0; stored_axis < order.size(); ++stored_axis)
+        inverse[static_cast<size_t>(order[stored_axis])] = stored_axis;
+    return inverse;
+}
 
 struct SDPAImplementationManager : public ImplementationManager {
     OV_GPU_PRIMITIVE_IMPL("onednn::sdpa")
@@ -99,17 +143,6 @@ struct SDPAImplementationManager : public ImplementationManager {
     }
 
 private:
-    static bool is_identity_order(const std::vector<int64_t>& order) {
-        if (!order.empty() && order.size() != 4)
-            return false;
-
-        for (size_t idx = 0; idx < order.size(); ++idx) {
-            if (order[idx] != static_cast<int64_t>(idx))
-                return false;
-        }
-        return true;
-    }
-
     static bool is_plain_4d(const layout& l, bool require_static) {
         const auto rank = l.get_partial_shape().rank();
         if (!rank.is_static() || rank.get_length() != 4 || (require_static && !l.is_static()) || l.format != format::bfyx)
@@ -205,6 +238,7 @@ private:
                                          const layout& k_layout,
                                          const layout& v_layout,
                                          const layout& out_layout,
+                                         const std::vector<int64_t>& out_order,
                                          bool require_static) {
         const auto& q_shape = q_layout.get_partial_shape();
         const auto& k_shape = k_layout.get_partial_shape();
@@ -214,6 +248,13 @@ private:
         if (require_static && (!q_layout.is_static() || !k_layout.is_static() || !v_layout.is_static() || !out_layout.is_static()))
             return false;
 
+        // The output buffer may be stored transposed (output_transpose_order). Compare against the
+        // logical [B, H, L, D] view, which is what the SDPA result itself is shaped like.
+        const auto out_inverse = inverse_4d_transpose_order(out_order);
+        auto out_logical = [&](size_t logical_axis) -> const ov::Dimension& {
+            return out_shape[out_inverse[logical_axis]];
+        };
+
         if (q_shape[1].is_static() && k_shape[1].is_static()) {
             const auto q_heads = q_shape[1].get_length();
             const auto kv_heads = k_shape[1].get_length();
@@ -222,13 +263,13 @@ private:
         }
         return dims_compatible(q_shape[0], k_shape[0]) &&
                dims_compatible(k_shape[0], v_shape[0]) &&
-               dims_compatible(out_shape[0], q_shape[0]) &&
-               dims_compatible(out_shape[1], q_shape[1]) &&
+               dims_compatible(out_logical(0), q_shape[0]) &&
+               dims_compatible(out_logical(1), q_shape[1]) &&
                dims_compatible(k_shape[1], v_shape[1]) &&
                dims_compatible(q_shape[3], k_shape[3]) &&
                dims_compatible(k_shape[2], v_shape[2]) &&
-               dims_compatible(out_shape[2], q_shape[2]) &&
-               dims_compatible(out_shape[3], v_shape[3]) &&
+               dims_compatible(out_logical(2), q_shape[2]) &&
+               dims_compatible(out_logical(3), v_shape[3]) &&
                dims_compatible(v_shape[3], q_shape[3]);
     }
 
@@ -245,10 +286,14 @@ private:
         if (prim.attn_mask_val.has_value())
             return false;
 
-        if (!is_identity_order(prim.input_q_transpose_order) ||
-            !is_identity_order(prim.input_k_transpose_order) ||
-            !is_identity_order(prim.input_v_transpose_order) ||
-            !is_identity_order(prim.output_transpose_order))
+        // Q/K/V must arrive in the plain [B, H, L, D] logical order: their descriptors are built
+        // from the layout as-is. The output may be stored transposed - TransposeFusion folds the
+        // trailing Transpose({0,2,1,3}) into output_transpose_order - which we express to oneDNN
+        // as a strided dst descriptor instead of rejecting it.
+        if (!is_identity_4d_transpose_order(prim.input_q_transpose_order) ||
+            !is_identity_4d_transpose_order(prim.input_k_transpose_order) ||
+            !is_identity_4d_transpose_order(prim.input_v_transpose_order) ||
+            !is_valid_4d_transpose_order(prim.output_transpose_order))
             return false;
 
         const auto& q_layout = input_layouts[ScaledDotProductAttentionInputIdx::QUERY];
@@ -270,7 +315,7 @@ private:
         if (q_layout.data_type != out_layout.data_type)
             return false;
 
-        if (!validate_shape_relations(q_layout, k_layout, v_layout, out_layout, require_static))
+        if (!validate_shape_relations(q_layout, k_layout, v_layout, out_layout, prim.output_transpose_order, require_static))
             return false;
 
         if (prim.has_attn_mask_input && !prim.is_causal) {

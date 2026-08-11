@@ -40,6 +40,28 @@ dnnl::memory::desc make_plain_4d_desc(const layout& l) {
     return dnnl::memory::desc(get_static_dims(l), convert_data_type(l.data_type), dnnl::memory::format_tag::abcd);
 }
 
+// Describe a buffer that is stored transposed relative to the logical [B, H, L, D] view oneDNN
+// works on. `order` is the OV transpose order (stored[i] == logical[order[i]]), so logical axis j
+// lives at stored axis inverse[j] and inherits that axis' dim and pitch.
+dnnl::memory::desc make_permuted_4d_desc(const layout& l, const std::vector<int64_t>& order) {
+    if (is_identity_transpose_order(order))
+        return make_plain_4d_desc(l);
+
+    const auto stored_dims = get_static_dims(l);
+    OPENVINO_ASSERT(stored_dims.size() == 4, "[GPU] oneDNN SDPA expects static rank-4 transposed layout");
+    const auto pitches = l.get_pitches();
+    const auto inverse = inverse_4d_transpose_order(order);
+
+    dnnl::memory::dims dims(4);
+    dnnl::memory::dims strides(4);
+    for (size_t logical_axis = 0; logical_axis < 4; ++logical_axis) {
+        const auto stored_axis = inverse[logical_axis];
+        dims[logical_axis] = stored_dims[stored_axis];
+        strides[logical_axis] = pitches[stored_axis];
+    }
+    return dnnl::memory::desc(dims, convert_data_type(l.data_type), strides);
+}
+
 dnnl::memory::desc make_key_desc(const layout& l) {
     auto dims = get_static_dims(l);
     OPENVINO_ASSERT(dims.size() == 4, "[GPU] oneDNN SDPA expects static rank-4 key layout");
@@ -105,7 +127,7 @@ dnnl::primitive_desc create_sdpa_primitive_desc(const kernel_impl_params& impl_p
     const auto q_md = make_plain_4d_desc(impl_params.get_input_layout(ScaledDotProductAttentionInputIdx::QUERY));
     const auto k_md = make_key_desc(impl_params.get_input_layout(ScaledDotProductAttentionInputIdx::KEY));
     const auto v_md = make_plain_4d_desc(impl_params.get_input_layout(ScaledDotProductAttentionInputIdx::VALUE));
-    const auto dst_md = make_plain_4d_desc(impl_params.get_output_layout(0));
+    const auto dst_md = make_permuted_4d_desc(impl_params.get_output_layout(0), prim->output_transpose_order);
 
     dnnl::primitive_attr qk_attr;
     dnnl::primitive_attr vs_attr;
