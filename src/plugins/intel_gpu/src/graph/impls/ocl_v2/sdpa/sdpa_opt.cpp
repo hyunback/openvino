@@ -10,6 +10,8 @@
 
 #include "sdpa_opt.hpp"
 
+#include <cstdlib>
+
 #include "../primitive_ocl_base.hpp"
 #include "../utils/kernel_generator.hpp"
 #include "common_utils/jitter.hpp"
@@ -190,9 +192,12 @@ bool SDPAOpt::supports_micro_sdpa(const RuntimeParams& params) {
         }
         // WA: Disable micro SDPA on xe3p for head_size <= 64 due to oneDNN micro-kernel
         // accuracy issues (produces inf/nan) after oneDNN main branch integration.
+        // Set SDPA_FORCE_MICRO_ON_XE3P=1 to bypass this WA for performance investigation only
+        // (accuracy is expected to be broken).
+        static const bool force_micro_on_xe3p = std::getenv("SDPA_FORCE_MICRO_ON_XE3P") != nullptr;
         auto extended_input_k_transpose_order = extend_order_in_num_heads_dim(desc->input_k_transpose_order);
         const auto k_head_size = get_head_size(params.get_input_layout(1), extended_input_k_transpose_order);
-        if (device_info.arch == gpu_arch::xe3p && k_head_size <= 64) {
+        if (device_info.arch == gpu_arch::xe3p && k_head_size <= 64 && !force_micro_on_xe3p) {
             return false;
         }
     } else {

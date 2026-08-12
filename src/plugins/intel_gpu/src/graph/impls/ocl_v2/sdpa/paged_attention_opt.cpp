@@ -11,6 +11,7 @@
 
 #include <array>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
 #include <utility>
 
@@ -1402,7 +1403,10 @@ public:
             // issues (inf/nan, run-to-run nondeterminism in the generated systolic ugemm). Falls back to
             // the OCL paged_attention path for all stages where micro SDPA is selectable (PREFILL / MIXED)
             // and for all KV dtypes.
-            if (params.get_device_info().arch == gpu_arch::xe3p) {
+            // Set SDPA_FORCE_MICRO_ON_XE3P=1 to bypass this WA for performance investigation only
+            // (accuracy is expected to be broken).
+            static const bool force_micro_on_xe3p = std::getenv("SDPA_FORCE_MICRO_ON_XE3P") != nullptr;
+            if (params.get_device_info().arch == gpu_arch::xe3p && !force_micro_on_xe3p) {
                 return false;
             }
         } else {
