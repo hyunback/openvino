@@ -1033,7 +1033,9 @@ KernelData SDPAMicroGenerator::get_kernel_data(const kernel_impl_params& params)
     kd.code = std::make_shared<KernelString>();
     kd.code->language = kernel_language::OCLC_V2;
     kd.code->entry_point = get_entry_point(params);
-    kd.code->jit = "";
+    // oneDNN 0c5ff275bf emits custom type names for sub-byte types in ugemm prototypes.
+    // OV passes the packed KV buffers as uchar, so alias them to the matching 1-byte storage type.
+    kd.code->jit = "#define u4 uchar\n#define s4 char\n";
     kd.code->undefs = "";
     kd.code->options = get_build_options(params);
     kd.code->batch_compilation = false;
